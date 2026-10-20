@@ -1,12 +1,28 @@
-export type Client = { id: string; name: string; color: string }
+export type Link = { label: string; url: string }
 
-/** Proyecto con tarifa propia en USD por hora. clientId null = sin cliente. */
-export type Project = { id: string; name: string; clientId: string | null; rate: number; color: string }
+export type ClientStatus = 'activo' | 'potencial' | 'pausado'
+
+export type Client = { id: string; name: string; color: string; links?: Link[]; notes?: string; status?: ClientStatus }
+
+/**
+ * Cómo se cobra un proyecto:
+ * - hora: tarifa en USD por hora, el monto sale del tiempo registrado.
+ * - fijo: precio total acordado, se cobra en pagos (ej. 50% adelanto + 50% al entregar).
+ * - entrega: precio por entrega/unidad, cada entrega cobrada se carga como pago.
+ * - interno: trabajo para vos (mejorar la web, mandar propuestas). Sólo suma tiempo.
+ */
+export type Billing = 'hora' | 'fijo' | 'entrega' | 'interno'
+
+/** Proyecto. clientId null = sin cliente. rate = USD/h (hora) o USD por entrega (entrega). price = total (fijo). */
+export type Project = { id: string; name: string; clientId: string | null; rate: number; color: string; billing?: Billing; price?: number }
+
+/** Plata cobrada (o por cobrar) que no sale de las horas: adelantos, hitos, entregas. */
+export type Payment = { id: string; projectId: string | null; label: string; amount: number; date: string; paid: boolean }
 
 export type Task = {
   id: number
   name: string
-  client: string // nombre con el que se registró (no cambia si se renombra el cliente)
+  client: string // nombre con el que se registró (se actualiza al renombrar)
   project: string
   projectId: string | null
   seconds: number
@@ -22,23 +38,42 @@ export type Task = {
   long: boolean
 }
 
+export type Action = { id: string; text: string; done: boolean }
+
+/** Meta de ingresos: subir `pct`% sobre `baseline` (USD/mes) en `months` meses desde `start` (AAAA-MM). */
+export type Goal = { baseline: number; pct: number; months: number; start: string; milestones: number[]; actions: Action[] }
+
+export type PlanItem = { id: string; date: string; text: string; projectId: string | null; hours: number; done: boolean }
+
 export const CURRENCY = 'USD'
 export const NO_CLIENT = 'Sin cliente'
 export const NO_PROJECT = 'Sin proyecto'
-export const NO_PROJECT_COLOR = '#7c8797'
+export const NO_PROJECT_COLOR = '#9b9a97'
 
-export const PALETTE = ['#e8ad4b', '#67d6b2', '#9b8cff', '#ee7373', '#5fb4f4', '#f08fd0', '#a3d965', '#f4a259', '#4fd1c5', '#c9b6ff']
+// Colores apagados, estilo Notion: sólo se usan en puntitos y barras finas.
+export const PALETTE = ['#2f6f9f', '#448361', '#9065b0', '#d9730d', '#c14c8a', '#cb912f', '#d44c47', '#64473a', '#337ea9', '#787774']
+
+export const BILLING_LABEL: Record<Billing, string> = {
+  hora: 'Por hora',
+  fijo: 'Precio fijo',
+  entrega: 'Por entrega',
+  interno: 'Interno',
+}
 
 export const RANKS: [number, string][] = [
-  [30, 'Leyenda freelance'],
-  [20, 'Maestro del oficio'],
-  [15, 'Mercenario'],
-  [10, 'Artesano'],
-  [5, 'Jornalero'],
+  [25, 'Leyenda'],
+  [15, 'Elite'],
+  [10, 'Experto'],
+  [6, 'Tasker Pro'],
+  [3, 'Tasker'],
   [1, 'Aprendiz'],
 ]
 
 export const DAILY_GOAL_HOURS = 6
+
+/** XP: 10 por cada dólar ganado y 1 por cada minuto trabajado (así el trabajo interno también suma). */
+export const XP_PER_USD = 10
+export const XP_PER_MINUTE = 1
 
 export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
@@ -50,24 +85,30 @@ export function dateKey(d = new Date()) {
   return `${d.getFullYear()}-${m}-${day}`
 }
 
+export function monthKey(d = new Date()) {
+  return dateKey(d).slice(0, 7)
+}
+
 export function timeKey(d = new Date()) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** Oro = horas × tarifa, redondeado a 2 decimales. */
+export function billingOf(p: Project | null | undefined): Billing {
+  return p?.billing ?? 'hora'
+}
+
+/** Monto por tiempo = horas × tarifa, redondeado a 2 decimales. */
 export function goldFor(seconds: number, rate: number) {
   return Math.round((seconds / 3600) * rate * 100) / 100
 }
 
-/** 1 XP por minuto; ×1,5 si factura; ×1,25 si es larga; +5 al terminar (+25 si es larga). */
-export function xpFor(seconds: number, billable: boolean, long: boolean) {
-  const minutes = seconds / 60
-  return Math.round(minutes * (billable ? 1.5 : 1) * (long ? 1.25 : 1) + (long ? 25 : 5))
+export function xpFor(seconds: number, amount: number) {
+  return Math.round((seconds / 60) * XP_PER_MINUTE + amount * XP_PER_USD)
 }
 
 /** XP que pide pasar del nivel n al n+1. */
 export function xpForLevel(n: number) {
-  return Math.round(150 * Math.pow(n, 1.35))
+  return Math.round(1000 * Math.pow(n, 1.25))
 }
 
 export function levelFor(totalXp: number) {
@@ -86,7 +127,7 @@ export function rankFor(level: number) {
 
 export function nextRank(level: number) {
   const next = [...RANKS].reverse().find(([min]) => min > level)
-  return next ? next[1] : 'Rango máximo'
+  return next ? { level: next[0], name: next[1] } : null
 }
 
 export function streakFor(dates: Set<string>) {
@@ -102,7 +143,7 @@ export function streakFor(dates: Set<string>) {
 }
 
 export function fmtClock(total: number) {
-  const h = Math.floor(total / 3600).toString().padStart(2, '0')
+  const h = Math.floor(total / 3600)
   const m = Math.floor((total % 3600) / 60).toString().padStart(2, '0')
   const s = Math.floor(total % 60).toString().padStart(2, '0')
   return `${h}:${m}:${s}`
@@ -118,66 +159,139 @@ export function fmtMoney(n: number) {
   return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+/** Monto redondo cuando no tiene centavos: 1.500 en vez de 1.500,00. */
+export function fmtShort(n: number) {
+  return n.toLocaleString('es-AR', { maximumFractionDigits: Number.isInteger(n) ? 0 : 2 })
+}
+
 export function parseTags(text: string) {
   return [...new Set(text.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean))]
+}
+
+export function parseAmount(text: string) {
+  // "1.500,50" (es-AR) o "1500.50": si hay coma, los puntos son de miles.
+  const t = text.trim().replace(/\s|US\$|\$/g, '')
+  const n = t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t
+  return Math.max(0, Number(n) || 0)
+}
+
+export function normalizeUrl(url: string) {
+  const u = url.trim()
+  return /^https?:\/\//i.test(u) ? u : `https://${u}`
 }
 
 /** Datos de la tarea según el proyecto elegido, con la tarifa congelada en ese momento. */
 export function describeProject(projectId: string | null, projects: Project[], clients: Client[]) {
   const project = projects.find((p) => p.id === projectId) ?? null
   const client = project ? clients.find((c) => c.id === project.clientId) ?? null : null
+  const billing = billingOf(project)
   return {
     project,
+    client,
+    billing,
     projectName: project?.name ?? NO_PROJECT,
     clientName: client?.name ?? NO_CLIENT,
-    rate: project?.rate ?? 0,
+    // Sólo los proyectos por hora convierten tiempo en plata.
+    rate: project && billing === 'hora' ? project.rate : 0,
     color: project?.color ?? NO_PROJECT_COLOR,
   }
 }
 
-/** Arma una tarea cerrada. Si no factura o no hay tarifa, suma XP y monto 0. */
+/** Arma una tarea cerrada. Si no factura por hora, suma tiempo y XP con monto 0. */
 export function buildTask(input: {
+  id?: number
   name: string
   seconds: number
   projectId: string | null
   billable: boolean
   tags: string[]
-  long: boolean
   date: string
   start?: string
+  rate?: number // para respetar la tarifa congelada al editar
   projects: Project[]
   clients: Client[]
 }): Task {
   const info = describeProject(input.projectId, input.projects, input.clients)
-  const paid = input.billable && info.rate > 0
+  const rate = input.rate ?? info.rate
+  const amount = input.billable && rate > 0 ? goldFor(input.seconds, rate) : 0
   return {
-    id: Date.now() + Math.floor(Math.random() * 1000),
+    id: input.id ?? Date.now() + Math.floor(Math.random() * 1000),
     name: input.name.trim() || 'Tarea sin título',
     client: info.clientName,
     project: info.projectName,
     projectId: info.project?.id ?? null,
     seconds: input.seconds,
     billable: input.billable,
-    rate: info.rate,
-    amount: paid ? goldFor(input.seconds, info.rate) : 0,
+    rate,
+    amount,
     currency: CURRENCY,
-    xp: xpFor(input.seconds, paid, input.long),
+    xp: xpFor(input.seconds, amount),
     color: info.color,
     tags: input.tags,
     date: input.date,
     start: input.start,
-    long: input.long,
+    long: false,
   }
 }
 
-/** Completa tareas guardadas por versiones anteriores de la app. */
+/** Completa tareas guardadas por versiones anteriores y recalcula el XP con la regla actual. */
 export function migrateTask(t: Partial<Task> & { id: number; seconds: number; amount: number }): Task {
   const rate = t.rate ?? (t.seconds ? Math.round((t.amount / (t.seconds / 3600)) * 100) / 100 : 0)
   return {
     name: 'Tarea sin título', client: NO_CLIENT, project: NO_PROJECT, projectId: null, currency: CURRENCY,
-    xp: 0, color: NO_PROJECT_COLOR, tags: [], date: dateKey(), long: false,
+    color: NO_PROJECT_COLOR, tags: [], date: dateKey(), long: false,
     ...t,
     billable: t.billable ?? t.amount > 0,
     rate,
+    xp: xpFor(t.seconds, t.amount),
   } as Task
+}
+
+export function paymentXp(p: Payment) {
+  return p.paid ? Math.round(p.amount * XP_PER_USD) : 0
+}
+
+/** Total cobrado (horas + pagos) en el mes AAAA-MM. */
+export function monthEarnings(month: string, tasks: Task[], payments: Payment[]) {
+  const fromTasks = tasks.filter((t) => t.date.startsWith(month)).reduce((s, t) => s + t.amount, 0)
+  const fromPayments = payments.filter((p) => p.paid && p.date.startsWith(month)).reduce((s, p) => s + p.amount, 0)
+  return Math.round((fromTasks + fromPayments) * 100) / 100
+}
+
+export function addMonths(month: string, n: number) {
+  const [y, m] = month.split('-').map(Number)
+  const d = new Date(y, m - 1 + n, 1, 12)
+  return monthKey(d)
+}
+
+export function monthsBetween(a: string, b: string) {
+  const [ya, ma] = a.split('-').map(Number)
+  const [yb, mb] = b.split('-').map(Number)
+  return (yb - ya) * 12 + (mb - ma)
+}
+
+/** Promedio de ingresos de los 3 meses completos anteriores a `month`. */
+export function suggestedBaseline(month: string, tasks: Task[], payments: Payment[]) {
+  const values = [1, 2, 3].map((i) => monthEarnings(addMonths(month, -i), tasks, payments))
+  const withData = values.filter((v) => v > 0)
+  return withData.length ? Math.round(withData.reduce((s, v) => s + v, 0) / withData.length) : 0
+}
+
+/**
+ * Objetivo de ingresos para un mes: sube en línea recta desde la base hasta base × (1 + pct)
+ * en el último mes del plan. Antes del plan no hay objetivo; después se mantiene el final.
+ */
+export function goalTarget(goal: Goal | null, month: string) {
+  if (!goal || goal.baseline <= 0) return 0
+  const i = monthsBetween(goal.start, month) + 1
+  if (i < 1) return 0
+  const step = Math.min(i, goal.months) / Math.max(1, goal.months)
+  return Math.round(goal.baseline * (1 + (goal.pct / 100) * step))
+}
+
+/** Micro objetivos del mes: los que cargó el usuario o, si no hay, cuartos del objetivo. */
+export function milestonesFor(goal: Goal | null, target: number) {
+  const own = (goal?.milestones ?? []).filter((m) => m > 0 && m < target).sort((a, b) => a - b)
+  if (own.length) return own
+  return target > 0 ? [0.25, 0.5, 0.75].map((f) => Math.round(target * f)) : []
 }
