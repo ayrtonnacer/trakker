@@ -47,7 +47,7 @@ const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 
 const WEEKDAYS = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO']
 
 type Active = { base: number; startedAt: number | null }
-type Coin = { id: number; left: number; delay: number; duration: number; size: number }
+type Coin = { id: number; left: number; delay: number; duration: number; size: number; drift: number; spin: number }
 type Toast = { id: number; title: string; text: string }
 
 function seedTasks(today: string): Task[] {
@@ -177,18 +177,21 @@ export default function Page() {
     timers.current.push(window.setTimeout(() => setToasts((cur) => cur.filter((t) => t.id !== id)), 4200))
   }
 
-  function celebrate(amount: number) {
-    const count = Math.min(24, Math.max(5, 5 + Math.floor(amount / 5)))
+  function celebrate(amount: number): number {
+    const count = Math.min(200, 100 + Math.floor(amount * 2))
     const id = Date.now()
     setCoins(Array.from({ length: count }, (_, i) => ({
       id: id + i,
-      left: 6 + Math.random() * 88,
-      delay: Math.random() * 0.7,
-      duration: 1.1 + Math.random() * 0.9,
-      size: 20 + Math.random() * 14,
+      left: Math.random() * 100,
+      delay: Math.random() * 1.6,
+      duration: 1.5 + Math.random() * 1.3,
+      size: 24 + Math.random() * 24,
+      drift: (Math.random() - 0.5) * 120,
+      spin: Math.random() < 0.5 ? -1 : 1,
     })))
     setPulse(true)
-    timers.current.push(window.setTimeout(() => setCoins([]), 2600))
+    timers.current.push(window.setTimeout(() => setCoins([]), 4200))
+    return count
     timers.current.push(window.setTimeout(() => setPulse(false), 1400))
   }
 
@@ -234,9 +237,9 @@ export default function Page() {
     setActive({ base: 0, startedAt: null })
     setTaskName('')
 
-    celebrate(amount)
+    const coinCount = celebrate(amount)
     if (soundOn) {
-      playCoins(Math.min(14, 5 + Math.floor(amount / 4)))
+      playCoins(coinCount)
       if (after > before) timers.current.push(window.setTimeout(() => playLevelUp(), 900))
     }
     toast(amount > 0 ? `+ ${client.currency === 'USD' ? 'US$' : client.currency} ${fmtMoney(amount)}` : 'Tarea registrada', `+${xp} XP`)
@@ -266,8 +269,8 @@ export default function Page() {
     setTasks((cur) => [task, ...cur].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id)))
     setShowNew(false)
     setManualError('')
-    celebrate(task.amount)
-    if (soundOn) playCoins(6)
+    const coinCount = celebrate(task.amount)
+    if (soundOn) playCoins(coinCount)
     toast(task.amount > 0 ? `+ US$ ${fmtMoney(task.amount)}` : 'Tarea registrada', `+${task.xp} XP`)
   }
 
@@ -323,7 +326,7 @@ export default function Page() {
 
       {showNew && <div className="modal-backdrop" onClick={() => setShowNew(false)}><div className="modal-card" onClick={(e) => e.stopPropagation()}><button className="modal-close" onClick={() => setShowNew(false)} aria-label="Cerrar"><X /></button><p className="eyebrow">NUEVO REGISTRO</p><h2>Cargar tiempo a mano</h2><p>Sumá una tarea que ya terminaste para no perder ese trabajo. Usa el cliente elegido en el timer ({client.name}).</p><input placeholder="Nombre de la tarea" value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} /><div className="modal-fields"><input type="date" value={manual.date} onChange={(e) => setManual({ ...manual, date: e.target.value })} /><input type="text" placeholder="01:30 (horas:min)" value={manual.time} onChange={(e) => setManual({ ...manual, time: e.target.value })} /></div>{manualError && <p className="form-error">{manualError}</p>}<button className="start-button" onClick={saveManual}><Check /> Guardar registro</button></div></div>}
 
-      <div className="coin-layer" aria-hidden="true">{coins.map((c) => <span key={c.id} className="coin" style={{ left: `${c.left}%`, width: c.size, height: c.size, animationDelay: `${c.delay}s`, animationDuration: `${c.duration}s` }}>$</span>)}</div>
+      <div className="coin-layer" aria-hidden="true">{coins.map((c) => <span key={c.id} className="coin" style={{ left: `${c.left}%`, width: c.size, height: c.size, fontSize: c.size * 0.5, animationDelay: `${c.delay}s`, animationDuration: `${c.duration}s`, ['--dx' as string]: `${c.drift}px`, ['--spin' as string]: `${c.spin * 900}deg` }}>$</span>)}</div>
       <div className="toast-stack" role="status" aria-live="polite">{toasts.map((t) => <div className="toast" key={t.id}><strong>{t.title}</strong><span>{t.text}</span></div>)}</div>
     </main>
   )
