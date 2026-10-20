@@ -1,93 +1,95 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  BarChart3,
-  Briefcase,
-  Check,
-  Clock3,
-  Coins,
-  DollarSign,
-  Flame,
-  ListChecks,
-  Pause,
-  Play,
-  Plus,
-  Sparkles,
-  Tag,
-  Trophy,
-  Volume2,
-  VolumeX,
-  X,
-  Zap,
-} from 'lucide-react'
-import { playCoins, playLevelUp, unlockAudio } from '@/lib/audio'
+import { BarChart3, Carrot, Check, DollarSign, ExternalLink, Home, ListChecks, Pickaxe, Play, Plus, Square, Tag, Target, Users, X } from 'lucide-react'
 import {
   DAILY_GOAL_HOURS,
+  XP_PER_USD,
   buildTask,
   dateKey,
   describeProject,
   fmtClock,
   fmtHours,
   fmtMoney,
+  fmtShort,
+  goalTarget,
   goldFor,
   levelFor,
   migrateTask,
+  milestonesFor,
+  monthEarnings,
   nextRank,
   parseTags,
+  paymentXp,
   rankFor,
   streakFor,
   timeKey,
   xpFor,
   type Client,
+  type Goal,
+  type Payment,
+  type PlanItem,
   type Project,
   type Task,
 } from '@/lib/game'
 import { ClientsView } from '@/components/tracker/clients-view'
+import { GoalsView } from '@/components/tracker/goals-view'
 import { ProjectPicker } from '@/components/tracker/project-picker'
 import { StatsView } from '@/components/tracker/stats-view'
 import { TaskRow } from '@/components/tracker/task-row'
 import { TasksView, dayLabel } from '@/components/tracker/tasks-view'
 
+// Se mantiene la clave de versiones anteriores para no perder los datos guardados.
 const STORAGE_KEY = 'tiempo-oro-v1'
 const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S']
 const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
-const WEEKDAYS = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO']
-const TABS: { id: string; icon: typeof Clock3 }[] = [
-  { id: 'Inicio', icon: Clock3 },
+const WEEKDAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+const TABS: { id: string; icon: typeof Home }[] = [
+  { id: 'Inicio', icon: Home },
   { id: 'Tareas', icon: ListChecks },
   { id: 'Estadísticas', icon: BarChart3 },
-  { id: 'Clientes', icon: Briefcase },
+  { id: 'Clientes', icon: Users },
+  { id: 'Metas', icon: Target },
 ]
 
 type Active = { base: number; startedAt: number | null; startTime?: string }
-type Draft = { name: string; projectId: string | null; billable: boolean; tags: string; long: boolean }
-type Coin = { id: number; left: number; delay: number; duration: number; size: number; drift: number; spin: number }
+type Draft = { name: string; projectId: string | null; billable: boolean; tags: string }
 type Toast = { id: number; title: string; text: string }
-type Manual = { name: string; projectId: string | null; billable: boolean; tags: string; date: string; from: string; to: string }
+type Manual = { id?: number; rate?: number; name: string; projectId: string | null; billable: boolean; tags: string; date: string; from: string; to: string }
+type Piece = { id: number; x: number; y: number; r: number; d: number; s: number; round: boolean }
 
-const EMPTY_DRAFT: Draft = { name: '', projectId: null, billable: false, tags: '', long: false }
+const EMPTY_DRAFT: Draft = { name: '', projectId: null, billable: false, tags: '' }
 
 function seedData(today: string) {
   const clients: Client[] = [
-    { id: 'c-norte', name: 'Estudio Norte', color: '#e8ad4b' },
-    { id: 'c-marea', name: 'Marea Studio', color: '#67d6b2' },
+    { id: 'c-outlier', name: 'Outlier', color: '#2f6f9f', status: 'activo', links: [{ label: 'Plataforma', url: 'https://app.outlier.ai' }, { label: 'Pagos', url: 'https://app.outlier.ai/earnings' }], notes: 'AI trainer. Pagan semanal, martes a la noche (hora del Pacífico).' },
+    { id: 'c-norte', name: 'Estudio Norte', color: '#448361', status: 'activo', links: [], notes: '' },
   ]
   const projects: Project[] = [
-    { id: 'p-web', name: 'Web institucional', clientId: 'c-norte', rate: 20, color: '#e8ad4b' },
-    { id: 'p-app', name: 'App mobile', clientId: 'c-marea', rate: 20, color: '#67d6b2' },
+    { id: 'p-ai', name: 'AI trainer', clientId: 'c-outlier', rate: 20, color: '#2f6f9f', billing: 'hora' },
+    { id: 'p-web', name: 'Web institucional', clientId: 'c-norte', rate: 0, price: 2000, color: '#448361', billing: 'fijo' },
+    { id: 'p-mio', name: 'Mi negocio', clientId: null, rate: 0, color: '#787774', billing: 'interno' },
+  ]
+  const payments: Payment[] = [
+    { id: 'pay-1', projectId: 'p-web', label: 'Adelanto 50%', amount: 1000, date: today, paid: true },
+    { id: 'pay-2', projectId: 'p-web', label: 'Entrega final 50%', amount: 1000, date: today, paid: false },
   ]
   const tasks: Task[] = [
-    { id: 1, name: 'Rediseño de landing page', client: 'Estudio Norte', project: 'Web institucional', projectId: 'p-web', seconds: 9600, billable: true, rate: 20, amount: 53.33, currency: 'USD', xp: 240, color: '#e8ad4b', tags: ['diseño', 'web'], date: today, start: '09:10', long: true },
-    { id: 2, name: 'Fix login en producción', client: 'Marea Studio', project: 'App mobile', projectId: 'p-app', seconds: 4500, billable: true, rate: 20, amount: 25, currency: 'USD', xp: 116, color: '#67d6b2', tags: ['bug', 'dev'], date: today, start: '12:00', long: false },
-    { id: 3, name: 'Llamada de seguimiento', client: 'Estudio Norte', project: 'Web institucional', projectId: 'p-web', seconds: 2700, billable: true, rate: 20, amount: 15, currency: 'USD', xp: 50, color: '#e8ad4b', tags: ['reunión'], date: today, start: '14:30', long: false },
+    buildTask({ id: 1, name: 'Tareas de evaluación', seconds: 9000, projectId: 'p-ai', billable: true, tags: ['ai'], date: today, start: '09:00', projects, clients }),
+    buildTask({ id: 2, name: 'Maquetado home', seconds: 5400, projectId: 'p-web', billable: true, tags: ['diseño'], date: today, start: '12:00', projects, clients }),
+    buildTask({ id: 3, name: 'Mandar propuestas', seconds: 2700, projectId: 'p-mio', billable: false, tags: ['ventas'], date: today, start: '15:00', projects, clients }),
   ]
-  return { clients, projects, tasks }
+  return { clients, projects, payments, tasks }
 }
 
 function minutesOf(hhmm: string) {
   const m = hhmm.match(/^(\d{1,2}):(\d{2})$/)
   return m ? Number(m[1]) * 60 + Number(m[2]) : NaN
+}
+
+function addMinutes(hhmm: string, minutes: number) {
+  const total = (((minutesOf(hhmm) || 0) + minutes) % 1440 + 1440) % 1440
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
 export default function Page() {
@@ -98,14 +100,15 @@ export default function Page() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [projects, setProjects] = useState<Project[]>([])
-  const [soundOn, setSoundOn] = useState(true)
+  const [payments, setPayments] = useState<Payment[]>([])
+  const [goal, setGoal] = useState<Goal | null>(null)
+  const [plan, setPlan] = useState<PlanItem[]>([])
   const [loaded, setLoaded] = useState(false)
   const [today, setToday] = useState('')
   const [manual, setManual] = useState<Manual | null>(null)
   const [manualError, setManualError] = useState('')
-  const [coins, setCoins] = useState<Coin[]>([])
+  const [pieces, setPieces] = useState<Piece[]>([])
   const [toasts, setToasts] = useState<Toast[]>([])
-  const [pulse, setPulse] = useState(false)
   const timers = useRef<number[]>([])
 
   const running = active.startedAt !== null
@@ -123,33 +126,38 @@ export default function Page() {
         setTasks((saved.tasks ?? []).map(migrateTask))
         setClients(saved.clients ?? seed.clients)
         setProjects(saved.projects ?? seed.projects)
-        setSoundOn(saved.soundOn ?? true)
+        setPayments(saved.payments ?? [])
+        setGoal(saved.goal ?? null)
+        setPlan(saved.plan ?? [])
         if (saved.active) setActive(saved.active)
         if (saved.draft) setDraft({ ...EMPTY_DRAFT, ...saved.draft })
-        else if (saved.taskName) setDraft({ ...EMPTY_DRAFT, name: saved.taskName })
       } else {
         setTasks(seed.tasks)
         setClients(seed.clients)
         setProjects(seed.projects)
+        setPayments(seed.payments)
       }
     } catch {
       setTasks(seed.tasks)
       setClients(seed.clients)
       setProjects(seed.projects)
+      setPayments(seed.payments)
     }
     setLoaded(true)
+    // Si la app queda abierta pasada la medianoche, "hoy" se actualiza solo.
+    const tick = window.setInterval(() => setToday(dateKey()), 30000)
     const pending = timers.current
-    return () => pending.forEach((t) => window.clearTimeout(t))
+    return () => { window.clearInterval(tick); pending.forEach((t) => window.clearTimeout(t)) }
   }, [])
 
   useEffect(() => {
     if (!loaded) return
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, soundOn, active, draft }))
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, payments, goal, plan, active, draft }))
     } catch {
       // Sin almacenamiento (modo privado): la app sigue andando, sólo no recuerda.
     }
-  }, [loaded, tasks, clients, projects, soundOn, active, draft])
+  }, [loaded, tasks, clients, projects, payments, goal, plan, active, draft])
 
   // El tiempo se calcula desde el inicio, así que sobrevive a pestañas en segundo plano.
   useEffect(() => {
@@ -160,23 +168,27 @@ export default function Page() {
 
   const elapsed = Math.floor(active.base + (active.startedAt ? Math.max(0, now - active.startedAt) / 1000 : 0))
   const info = describeProject(draft.projectId, projects, clients)
-  const paidNow = draft.billable && info.rate > 0
-  const liveGold = paidNow ? goldFor(elapsed, info.rate) : 0
-  const liveXp = elapsed > 0 ? xpFor(elapsed, paidNow, draft.long) : 0
+  const liveGold = draft.billable && info.rate > 0 ? goldFor(elapsed, info.rate) : 0
+
+  useEffect(() => {
+    document.title = running ? `${fmtClock(elapsed)} · ${draft.name || 'Tasker'}` : 'Tasker'
+  }, [running, elapsed, draft.name])
 
   const suggestedTags = useMemo(() => {
     const count = new Map<string, number>()
     tasks.slice(0, 200).forEach((t) => t.tags.forEach((tag) => count.set(tag, (count.get(tag) ?? 0) + 1)))
     const current = new Set(parseTags(draft.tags))
-    return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t).filter((t) => !current.has(t)).slice(0, 6)
+    return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t).filter((t) => !current.has(t)).slice(0, 5)
   }, [tasks, draft.tags])
+
+  const totalXp = useMemo(() => tasks.reduce((s, t) => s + t.xp, 0) + payments.reduce((s, p) => s + paymentXp(p), 0), [tasks, payments])
 
   const stats = useMemo(() => {
     const todayTasks = tasks.filter((t) => t.date === today)
     const todaySeconds = todayTasks.reduce((s, t) => s + t.seconds, 0)
-    const todayGold = todayTasks.reduce((s, t) => s + t.amount, 0)
-    const todayXp = todayTasks.reduce((s, t) => s + t.xp, 0)
-    const totalXp = tasks.reduce((s, t) => s + t.xp, 0)
+    const todayPaid = payments.filter((p) => p.paid && p.date === today).reduce((s, p) => s + p.amount, 0)
+    const todayGold = todayTasks.reduce((s, t) => s + t.amount, 0) + todayPaid
+    const todayXp = todayTasks.reduce((s, t) => s + t.xp, 0) + payments.filter((p) => p.date === today).reduce((s, p) => s + paymentXp(p), 0)
     const dates = new Set(tasks.map((t) => t.date))
 
     const base = today ? new Date(`${today}T12:00:00`) : new Date(0)
@@ -186,30 +198,23 @@ export default function Page() {
       const d = new Date(monday)
       d.setDate(monday.getDate() + i)
       const key = dateKey(d)
-      return { letter: DAY_LETTERS[d.getDay()], key, has: dates.has(key), isToday: key === today }
-    })
-    const weekKeys = new Set(week.map((w) => w.key))
-    const weekTasks = tasks.filter((t) => weekKeys.has(t.date))
-    const weekSeconds = weekTasks.reduce((s, t) => s + t.seconds, 0)
-    const billable = weekTasks.filter((t) => t.billable).reduce((s, t) => s + t.seconds, 0)
-
-    const days = Array.from({ length: 14 }, (_, i) => {
-      const d = new Date(base)
-      d.setDate(base.getDate() - (13 - i))
-      const key = dateKey(d)
       const secs = tasks.filter((t) => t.date === key).reduce((s, t) => s + t.seconds, 0)
-      return { letter: DAY_LETTERS[d.getDay()], pct: Math.min(100, (secs / 3600 / 8) * 100), hit: secs / 3600 >= DAILY_GOAL_HOURS }
+      return { letter: DAY_LETTERS[d.getDay()], key, secs, isToday: key === today, future: key > today }
     })
+    const weekSeconds = week.reduce((s, w) => s + w.secs, 0)
+    const month = today.slice(0, 7)
 
     return {
-      todaySeconds, todayGold, todayXp, totalXp, week, days, weekSeconds, weekCount: weekTasks.length,
-      weekGold: weekTasks.reduce((s, t) => s + t.amount, 0),
-      billablePct: weekSeconds ? Math.round((billable / weekSeconds) * 100) : 0,
+      todaySeconds, todayGold, todayXp, week, weekSeconds,
+      weekMax: Math.max(DAILY_GOAL_HOURS * 3600 * 1.2, ...week.map((w) => w.secs)),
       streak: streakFor(dates),
-      goalPct: Math.min(100, Math.round((todaySeconds / 3600 / DAILY_GOAL_HOURS) * 100)),
-      ...levelFor(totalXp),
+      monthEarned: monthEarnings(month, tasks, payments),
+      monthTarget: goalTarget(goal, month),
     }
-  }, [tasks, today])
+  }, [tasks, payments, goal, today])
+
+  const lvl = levelFor(totalXp)
+  const rankNext = nextRank(lvl.level)
 
   function toast(title: string, text: string) {
     const id = Date.now() + Math.random()
@@ -217,42 +222,31 @@ export default function Page() {
     timers.current.push(window.setTimeout(() => setToasts((cur) => cur.filter((t) => t.id !== id)), 4200))
   }
 
-  function celebrate(amount: number): number {
-    const count = Math.min(200, 100 + Math.floor(amount * 2))
+  /** Festejo sobrio: un estallido corto de papelitos en blanco y negro. */
+  function celebrate() {
     const id = Date.now()
-    setCoins(Array.from({ length: count }, (_, i) => ({
-      id: id + i,
-      left: Math.random() * 100,
-      delay: Math.random() * 1.6,
-      duration: 1.5 + Math.random() * 1.3,
-      size: 24 + Math.random() * 24,
-      drift: (Math.random() - 0.5) * 120,
-      spin: Math.random() < 0.5 ? -1 : 1,
-    })))
-    setPulse(true)
-    timers.current.push(window.setTimeout(() => setCoins([]), 4200))
-    timers.current.push(window.setTimeout(() => setPulse(false), 1400))
-    return count
+    setPieces(Array.from({ length: 36 }, (_, i) => {
+      const angle = (Math.PI * 2 * i) / 36 + Math.random() * 0.4
+      const dist = 90 + Math.random() * 140
+      return { id: id + i, x: Math.cos(angle) * dist, y: Math.sin(angle) * dist - 60, r: (Math.random() - 0.5) * 720, d: Math.random() * 0.12, s: 5 + Math.random() * 6, round: Math.random() < 0.35 }
+    }))
+    timers.current.push(window.setTimeout(() => setPieces([]), 1300))
   }
 
   /** Registra la tarea, festeja y avisa si subió de nivel. */
   function record(task: Task) {
-    const before = levelFor(stats.totalXp).level
-    const after = levelFor(stats.totalXp + task.xp).level
+    const before = levelFor(totalXp).level
+    const after = levelFor(totalXp + task.xp).level
     setTasks((cur) => [task, ...cur])
-    const coinCount = celebrate(task.amount)
-    if (soundOn) {
-      playCoins(coinCount)
-      if (after > before) timers.current.push(window.setTimeout(() => playLevelUp(), 900))
-    }
-    toast(task.amount > 0 ? `+ US$ ${fmtMoney(task.amount)}` : 'Tarea registrada', `+${task.xp} XP · ${task.project}`)
-    if (after > before) toast(`¡Subiste al nivel ${after}!`, rankFor(after))
+    celebrate()
+    toast(`Tarea terminada · ${fmtHours(task.seconds)}`, `${task.amount > 0 ? `+US$ ${fmtMoney(task.amount)} · ` : ''}+${task.xp} XP · ${task.project}`)
+    if (after > before) toast(`Subiste al nivel ${after}`, rankFor(after))
   }
 
   function pickProject(projectId: string | null) {
-    const p = projects.find((x) => x.id === projectId)
-    // Un proyecto con tarifa arranca como facturable; se puede cambiar con el botón $.
-    setDraft((d) => ({ ...d, projectId, billable: p ? p.rate > 0 : false }))
+    const p = describeProject(projectId, projects, clients)
+    // Un proyecto con tarifa por hora arranca como facturable; se puede cambiar con el botón $.
+    setDraft((d) => ({ ...d, projectId, billable: p.rate > 0 }))
   }
 
   function addTag(tag: string) {
@@ -260,15 +254,9 @@ export default function Page() {
   }
 
   function startTask() {
-    unlockAudio()
-    if (!draft.name.trim()) setDraft((d) => ({ ...d, name: 'Tarea sin título' }))
     const t = Date.now()
     setNow(t)
     setActive((a) => ({ ...a, startedAt: t, startTime: a.startTime ?? timeKey() }))
-  }
-
-  function pauseTask() {
-    setActive((a) => ({ base: elapsed, startedAt: null, startTime: a.startTime }))
   }
 
   function discardTask() {
@@ -277,21 +265,19 @@ export default function Page() {
     setDraft((d) => ({ ...d, name: '' }))
   }
 
-  function finishTask() {
-    if (elapsed < 1) return
+  function stopTask() {
+    if (elapsed < 1) return discardTask()
     record(buildTask({
       name: draft.name, seconds: elapsed, projectId: draft.projectId, billable: draft.billable,
-      tags: parseTags(draft.tags), long: draft.long, date: dateKey(), start: active.startTime, projects, clients,
+      tags: parseTags(draft.tags), date: dateKey(), start: active.startTime, projects, clients,
     }))
     setActive({ base: 0, startedAt: null })
-    setDraft((d) => ({ ...d, name: '', tags: '', long: false }))
+    setDraft((d) => ({ ...d, name: '', tags: '' }))
   }
 
-  function repeatTask(task: Task) {
+  function startWith(next: Draft) {
     if (elapsed > 0 && !window.confirm('Hay una tarea en curso. ¿Descartarla y empezar esta?')) return
-    unlockAudio()
-    const projectId = projects.some((p) => p.id === task.projectId) ? task.projectId : null
-    setDraft({ name: task.name, projectId, billable: task.billable, tags: task.tags.join(', '), long: task.long })
+    setDraft(next)
     const t = Date.now()
     setNow(t)
     setActive({ base: 0, startedAt: t, startTime: timeKey() })
@@ -299,23 +285,49 @@ export default function Page() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function toggleBillable(id: number) {
+  function repeatTask(task: Task) {
+    const projectId = projects.some((p) => p.id === task.projectId) ? task.projectId : null
+    startWith({ name: task.name, projectId, billable: task.billable, tags: task.tags.join(', ') })
+  }
+
+  function startPlanItem(item: PlanItem) {
+    const projectId = projects.some((p) => p.id === item.projectId) ? item.projectId : null
+    startWith({ name: item.text, projectId, billable: describeProject(projectId, projects, clients).rate > 0, tags: '' })
+  }
+
+  function setBillable(ids: number[], billable: boolean) {
+    const set = new Set(ids)
     setTasks((cur) => cur.map((t) => {
-      if (t.id !== id) return t
-      const billable = !t.billable
-      const paid = billable && t.rate > 0
-      return { ...t, billable, amount: paid ? goldFor(t.seconds, t.rate) : 0, xp: xpFor(t.seconds, paid, t.long) }
+      if (!set.has(t.id)) return t
+      const amount = billable && t.rate > 0 ? goldFor(t.seconds, t.rate) : 0
+      return { ...t, billable, amount, xp: xpFor(t.seconds, amount) }
     }))
+  }
+
+  function toggleBillable(id: number) {
+    const t = tasks.find((x) => x.id === id)
+    if (t) setBillable([id], !t.billable)
   }
 
   function deleteTask(id: number) {
     if (window.confirm('¿Borrar esta tarea? También baja el XP que dio.')) setTasks((cur) => cur.filter((t) => t.id !== id))
   }
 
+  function deleteMany(ids: number[]) {
+    const set = new Set(ids)
+    setTasks((cur) => cur.filter((t) => !set.has(t.id)))
+  }
+
   function openManual() {
     const d = new Date()
     const from = new Date(d.getTime() - 3600000)
     setManual({ name: '', projectId: draft.projectId, billable: draft.billable, tags: '', date: dateKey(), from: timeKey(from), to: timeKey(d) })
+    setManualError('')
+  }
+
+  function editTask(task: Task) {
+    const from = task.start ?? '09:00'
+    setManual({ id: task.id, rate: task.rate, name: task.name, projectId: task.projectId, billable: task.billable, tags: task.tags.join(', '), date: task.date, from, to: addMinutes(from, Math.round(task.seconds / 60)) })
     setManualError('')
   }
 
@@ -329,91 +341,161 @@ export default function Page() {
     const minutes = b > a ? b - a : b + 1440 - a
     if (minutes <= 0) return setManualError('La tarea tiene que durar al menos un minuto.')
     if (minutes > 16 * 60) return setManualError('No se aceptan más de 16 horas.')
-    unlockAudio()
-    record(buildTask({
-      name: manual.name, seconds: minutes * 60, projectId: manual.projectId, billable: manual.billable,
-      tags: parseTags(manual.tags), long: false, date: manual.date || dateKey(), start: manual.from, projects, clients,
-    }))
+    const old = manual.id ? tasks.find((t) => t.id === manual.id) : undefined
+    // Al editar se respeta la tarifa con que se registró, salvo que cambie el proyecto.
+    const keepRate = old && old.projectId === manual.projectId ? old.rate : undefined
+    const task = buildTask({
+      id: manual.id, name: manual.name, seconds: minutes * 60, projectId: manual.projectId, billable: manual.billable,
+      tags: parseTags(manual.tags), date: manual.date || dateKey(), start: manual.from, rate: keepRate, projects, clients,
+    })
+    if (old) setTasks((cur) => cur.map((t) => (t.id === old.id ? task : t)))
+    else record(task)
     setManual(null)
   }
 
-  const headerDate = today ? (() => { const d = new Date(`${today}T12:00:00`); return `${WEEKDAYS[d.getDay()]}, ${d.getDate()} DE ${MONTHS[d.getMonth()].toUpperCase()}` })() : ' '
-  const ringPct = Math.max(stats.goalPct, running ? Math.min(100, Math.round(((stats.todaySeconds + elapsed) / 3600 / DAILY_GOAL_HOURS) * 100)) : 0)
+  const headerDate = today ? (() => { const d = new Date(`${today}T12:00:00`); return `${WEEKDAYS[d.getDay()]} ${d.getDate()} de ${MONTHS[d.getMonth()]}` })() : ' '
   const manualInfo = manual ? describeProject(manual.projectId, projects, clients) : null
-  const recent = [...tasks].sort((a, b) => (b.date + (b.start ?? '')).localeCompare(a.date + (a.start ?? '')) || b.id - a.id).slice(0, 4)
+  // Al editar, la tarifa congelada sigue valiendo mientras no cambie el proyecto.
+  const manualRate = manual && manualInfo ? (manual.id && tasks.find((t) => t.id === manual.id)?.projectId === manual.projectId ? manual.rate ?? 0 : manualInfo.rate) : 0
+  const recent = [...tasks].sort((a, b) => (b.date + (b.start ?? '')).localeCompare(a.date + (a.start ?? '')) || b.id - a.id).slice(0, 5)
+  const todayPlan = plan.filter((p) => p.date === today)
+
+  // Barra de ganancias del mes: con meta, hasta la meta; sin meta, hasta el próximo número redondo.
+  const monthLive = stats.monthEarned + liveGold
+  const barTarget = stats.monthTarget || Math.max(100, Math.ceil((monthLive + 1) / 500) * 500)
+  const steps = stats.monthTarget ? milestonesFor(goal, stats.monthTarget) : []
+  const nextStep = [...steps, stats.monthTarget].find((m) => m > monthLive) ?? 0
+  const monthName = today ? MONTHS[Number(today.slice(5, 7)) - 1] : ''
 
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand"><div className="brand-mark"><Coins /></div><div><strong>TIEMPO<span> ORO</span></strong><small>Freelance time tracker</small></div></div>
+        <div className="brand"><div className="brand-mark"><Pickaxe /></div><strong>Tasker</strong></div>
         <nav className="desktop-nav" aria-label="Secciones">
           {TABS.map(({ id }) => <button key={id} className={activeTab === id ? 'nav-active' : ''} onClick={() => setActiveTab(id)}>{id}</button>)}
         </nav>
         <div className="header-actions">
           {running && activeTab !== 'Inicio' && <button className="running-pill" onClick={() => setActiveTab('Inicio')}><i /> {fmtClock(elapsed)}</button>}
-          <button className="icon-button sound-toggle" aria-label={soundOn ? 'Silenciar sonidos' : 'Activar sonidos'} aria-pressed={soundOn} title={soundOn ? 'Sonido activado' : 'Sonido apagado'} onClick={() => { unlockAudio(); setSoundOn((s) => !s) }}>{soundOn ? <Volume2 /> : <VolumeX />}</button>
-          <div className="profile"><div className="avatar">AN</div><span>Ayrton</span></div>
+          <div className="avatar" title="Ayrton">AN</div>
         </div>
       </header>
 
       <div className="content-wrap">
         {activeTab === 'Inicio' && <>
-          <section className="welcome-row"><div><p className="eyebrow">{headerDate}</p><h1>Buenas, Ayrton <span className="wave">✦</span></h1><p className="subtitle">Cada minuto cuenta. {stats.todaySeconds > 0 ? 'Hoy ya hiciste un buen trabajo.' : 'Arrancá tu primera tarea del día.'}</p></div></section>
+          <section className="welcome-row"><p className="eyebrow">{headerDate}</p><h1>Hola, Ayrton</h1></section>
+
+          <section className={`timer-bar ${running ? 'is-running' : ''}`}>
+            <input className="timer-name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { if (running) stopTask(); else startTask() } }} maxLength={140} placeholder="¿En qué estás trabajando?" aria-label="Nombre de tarea" />
+            <div className="timer-controls">
+              <ProjectPicker projects={projects} clients={clients} value={draft.projectId} onChange={pickProject} onCreateProject={(p) => setProjects((cur) => [...cur, p])} compact />
+              <label className="tags-input"><Tag /><input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} placeholder="Etiquetas" aria-label="Etiquetas" /></label>
+              <button className={`billable-toggle ${draft.billable ? 'billable-on' : ''}`} onClick={() => setDraft({ ...draft, billable: !draft.billable })} aria-pressed={draft.billable} title={draft.billable ? (info.rate > 0 ? `Facturable a ${info.rate} USD/h` : 'Facturable, pero sin tarifa por hora') : 'No facturable'} aria-label="Facturable"><DollarSign /></button>
+              <span className="timer-clock" aria-live="off">{fmtClock(elapsed)}</span>
+              <button className={`play-button ${running ? 'stop' : ''}`} onClick={running ? stopTask : startTask} aria-label={running ? 'Terminar y registrar' : 'Empezar'} title={running ? 'Terminar y registrar' : 'Empezar'}>{running ? <Square /> : <Play />}</button>
+              {elapsed > 0 && <button className="icon-button" onClick={discardTask} aria-label="Descartar" title="Descartar sin registrar"><X /></button>}
+            </div>
+          </section>
+          <div className="timer-sub">
+            {running && liveGold > 0 && <span>+US$ {fmtMoney(liveGold)} · {info.rate} USD/h</span>}
+            {running && info.billing !== 'hora' && <span>{info.billing === 'interno' ? 'Proyecto interno: suma tiempo y XP' : 'Se cobra por pagos: el tiempo te muestra cuánto rinde la hora'}</span>}
+            {info.client?.links?.map((l, i) => <a key={i} className="link-chip" href={l.url} target="_blank" rel="noreferrer noopener"><ExternalLink /> {l.label}</a>)}
+            {!running && suggestedTags.length > 0 && <span className="tag-suggestions">{suggestedTags.map((t) => <button key={t} onClick={() => addTag(t)}>+ {t}</button>)}</span>}
+          </div>
 
           <section className="hud-grid">
-            <article className={`gold-card card-glow ${pulse ? 'gold-pulse' : ''}`}><div className="card-label"><span><Coins /> ORO GANADO HOY</span><span className="currency">USD</span></div><div className="gold-value">$ {fmtMoney(stats.todayGold)}</div><div className="gold-foot"><span><Zap /> +{stats.todayXp} XP hoy</span><span>Meta diaria {stats.goalPct}%</span></div><div className="progress-track"><div className="progress-fill" style={{ width: `${stats.goalPct}%` }} /></div></article>
-            <article className="stat-card"><div className="card-label"><span><Flame /> RACHA ACTUAL</span><span className="streak-badge">{stats.streak} {stats.streak === 1 ? 'DÍA' : 'DÍAS'}</span></div><div className="stat-main"><strong>{stats.streak}</strong><span>{stats.streak === 1 ? 'día' : 'días'}<br /><small>Seguí así</small></span></div><div className="week-dots">{stats.week.map((d) => <div key={d.key} className={d.isToday ? 'dot-today' : d.has ? 'dot-on' : 'dot-off'}><span>{d.letter}</span><i>{d.has ? '✓' : '•'}</i></div>)}</div></article>
-            <article className="stat-card level-card"><div className="card-label"><span><Trophy /> NIVEL {stats.level}</span><span className="rank">{rankFor(stats.level).toUpperCase()}</span></div><div className="level-row"><strong>{stats.into.toLocaleString('es-AR')} <small>/ {stats.need.toLocaleString('es-AR')} XP</small></strong><span>+{stats.todayXp} XP hoy</span></div><div className="progress-track xp-track"><div className="progress-fill" style={{ width: `${Math.round((stats.into / stats.need) * 100)}%` }} /></div><div className="next-level"><span>Faltan {(stats.need - stats.into).toLocaleString('es-AR')} XP</span><span>{nextRank(stats.level)}</span></div></article>
+            <article className="card earnings-card">
+              <div className="card-label"><span>Ganado en {monthName}</span>{stats.monthTarget ? <span>Meta US$ {fmtShort(stats.monthTarget)}</span> : <button className="text-button" onClick={() => setActiveTab('Metas')}>Definir meta</button>}</div>
+              <div className="big-number">US$ {fmtMoney(monthLive)}</div>
+              <div className="carrot-track">
+                <div className="carrot-fill" style={{ width: `${Math.min(100, (monthLive / barTarget) * 100)}%` }} />
+                {steps.map((m) => <i key={m} className={`track-mark ${monthLive >= m ? 'done' : ''}`} style={{ left: `${(m / barTarget) * 100}%` }} title={`US$ ${fmtShort(m)}`} />)}
+                {nextStep > 0 && <span className="carrot" style={{ left: `${Math.min(100, (nextStep / barTarget) * 100)}%` }} title={`Próximo: US$ ${fmtShort(nextStep)}`}><Carrot /></span>}
+              </div>
+              <div className="card-foot">
+                {nextStep > 0 ? <span>Faltan <b>US$ {fmtShort(Math.ceil((nextStep - monthLive) * 100) / 100)}</b> para llegar a {fmtShort(nextStep)}</span> : stats.monthTarget ? <span><b>¡Meta del mes cumplida!</b></span> : <span>Con una meta vas a ver micro objetivos en esta barra.</span>}
+                <span>Hoy US$ {fmtMoney(stats.todayGold + liveGold)}</span>
+              </div>
+            </article>
+            <article className="card">
+              <div className="card-label"><span>Hoy</span><span>Racha {stats.streak} {stats.streak === 1 ? 'día' : 'días'}</span></div>
+              <div className="big-number">{fmtHours(stats.todaySeconds + elapsed)}</div>
+              <div className="thin-track"><div style={{ width: `${Math.min(100, ((stats.todaySeconds + elapsed) / 3600 / DAILY_GOAL_HOURS) * 100)}%` }} /></div>
+              <div className="card-foot"><span>Meta diaria {DAILY_GOAL_HOURS}h</span><span>Semana {fmtHours(stats.weekSeconds)}</span></div>
+            </article>
+            <article className="card">
+              <div className="card-label"><span>Nivel {lvl.level} · {rankFor(lvl.level)}</span><span>+{stats.todayXp.toLocaleString('es-AR')} XP hoy</span></div>
+              <div className="big-number">{lvl.into.toLocaleString('es-AR')} <small>/ {lvl.need.toLocaleString('es-AR')} XP</small></div>
+              <div className="thin-track"><div style={{ width: `${Math.round((lvl.into / lvl.need) * 100)}%` }} /></div>
+              <div className="card-foot"><span>{rankNext ? `${rankNext.name} en nivel ${rankNext.level}` : 'Rango máximo'}</span><span title="1 minuto trabajado = 1 XP">US$ 1 = {XP_PER_USD} XP</span></div>
+            </article>
           </section>
 
           <section className="workspace-grid">
-            <article className="timer-panel panel">
-              <div className="panel-heading"><div><p className="eyebrow">ENFOQUE PROFUNDO</p><h2>¿En qué estás trabajando?</h2></div><button className="more-button" onClick={discardTask} aria-label="Descartar tarea en curso" title="Descartar" disabled={elapsed === 0}><X /></button></div>
-              <div className="task-input-row">
-                <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && !running) startTask() }} maxLength={140} placeholder="¿Qué estás haciendo?" aria-label="Nombre de tarea" />
-              </div>
-              <div className="task-toolbar">
-                <ProjectPicker projects={projects} clients={clients} value={draft.projectId} onChange={pickProject} onCreateProject={(p) => setProjects((cur) => [...cur, p])} />
-                <label className="tags-input"><Tag /><input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} placeholder="etiquetas, separadas por coma" aria-label="Etiquetas" /></label>
-                <button className={`billable-toggle big ${draft.billable ? 'billable-on' : ''}`} onClick={() => setDraft({ ...draft, billable: !draft.billable })} aria-pressed={draft.billable} title={draft.billable ? (info.rate > 0 ? `Facturable a ${info.rate} USD/h` : 'Facturable, pero el proyecto no tiene tarifa') : 'No facturable'}><DollarSign /><span>{draft.billable ? 'Paga' : 'No paga'}</span></button>
-                <button className={`chip ${draft.long ? 'chip-on' : ''}`} onClick={() => setDraft({ ...draft, long: !draft.long })} aria-pressed={draft.long}>Larga +25% XP</button>
-              </div>
-              {suggestedTags.length > 0 && <div className="tag-suggestions">{suggestedTags.map((t) => <button key={t} onClick={() => addTag(t)}>+ {t}</button>)}</div>}
-              {draft.billable && info.rate === 0 && <p className="hint">Este {draft.projectId ? 'proyecto no tiene tarifa' : 'timer no tiene proyecto'}: la tarea suma XP pero no plata. Elegí un proyecto con tarifa o cargala en Clientes.</p>}
-              <div className="timer-zone"><div className="timer-ring" style={{ background: `conic-gradient(var(--gold) 0 ${ringPct}%, #25313e ${ringPct}% 100%)` }}><div className="timer-ring-inner"><span>{fmtClock(elapsed)}</span><small>{running ? 'REGISTRANDO TIEMPO' : elapsed > 0 ? 'EN PAUSA' : 'LISTO PARA EMPEZAR'}</small></div></div><div className="timer-meta"><span><Coins /> +$ {fmtMoney(liveGold)}</span><span><Zap /> +{liveXp} XP</span>{paidNow && <span className="rate-note">{info.rate} USD/h</span>}</div></div>
-              <div className="timer-actions"><button className="start-button" onClick={running ? pauseTask : startTask}>{running ? <Pause data-icon="inline-start" /> : <Play data-icon="inline-start" />}{running ? 'Pausar' : elapsed > 0 ? 'Seguir' : 'Empezar'}</button><button className="finish-button" onClick={finishTask} disabled={elapsed < 1}><Check data-icon="inline-start" /> Terminar y cobrar</button></div>
-              <div className="timer-tip"><Sparkles /> Tip: las tareas facturables dan 50% más de XP</div>
+            <article className="panel">
+              <div className="panel-heading"><h3>Plan de hoy</h3><button className="text-button" onClick={() => setActiveTab('Metas')}>Planificar semana →</button></div>
+              {todayPlan.length === 0 ? <p className="empty-list">No planificaste nada para hoy. Armá tu semana en Metas.</p> : (
+                <ul className="check-list">
+                  {todayPlan.map((i) => {
+                    const p = projects.find((x) => x.id === i.projectId)
+                    return (
+                      <li key={i.id} className={i.done ? 'done' : ''}>
+                        <button className={`pay-check ${i.done ? 'on' : ''}`} onClick={() => setPlan((cur) => cur.map((x) => (x.id === i.id ? { ...x, done: !x.done } : x)))} aria-label={i.done ? 'Marcar pendiente' : 'Marcar hecha'}>{i.done && <Check />}</button>
+                        <span>{i.text}{p && <small> · {p.name}</small>}{i.hours > 0 && <small> · {i.hours}h</small>}</span>
+                        <button className="icon-button" onClick={() => startPlanItem(i)} aria-label="Empezar timer" title="Empezar timer"><Play /></button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
             </article>
-
-            <article className="daily-panel panel"><div className="panel-heading"><div><p className="eyebrow">RESUMEN DE ACTIVIDAD</p><h2>Tu semana</h2></div><button className="period-button" onClick={() => setActiveTab('Estadísticas')}>Ver estadísticas →</button></div><div className="chart-area"><div className="chart-labels"><span>8h</span><span>6h</span><span>4h</span><span>2h</span><span>0h</span></div><div className="bars">{stats.days.map((d, i) => <div className="bar-column" key={i}><div className={`bar ${d.hit ? 'bar-highlight' : ''}`} style={{ height: `${Math.max(d.pct, 2)}%` }} /><span>{d.letter}</span></div>)}</div><div className="goal-line"><span>Meta diaria {DAILY_GOAL_HOURS}h</span></div></div><div className="activity-stats"><div><span>ESTA SEMANA</span><strong>{fmtHours(stats.weekSeconds)}</strong></div><div><span>FACTURABLE</span><strong>{stats.billablePct}%</strong></div><div><span>GANADO</span><strong>US$ {fmtMoney(stats.weekGold)}</strong></div></div></article>
+            <article className="panel">
+              <div className="panel-heading"><h3>Esta semana</h3><button className="text-button" onClick={() => setActiveTab('Estadísticas')}>Estadísticas →</button></div>
+              <div className="mini-chart">
+                <i className="mini-goal" style={{ bottom: `calc(19px + (100% - 19px) * ${(DAILY_GOAL_HOURS * 3600) / stats.weekMax})` }} />
+                {stats.week.map((d) => {
+                  const secs = d.secs + (d.isToday ? elapsed : 0)
+                  return <div key={d.key} className={`mini-col ${d.isToday ? 'is-today' : ''}`} title={fmtHours(secs)}><div className="mini-bar-area"><div className={`mini-bar ${secs / 3600 >= DAILY_GOAL_HOURS ? 'hit' : ''}`} style={{ height: `${(secs / stats.weekMax) * 100}%` }} /></div><span>{d.letter}</span></div>
+                })}
+              </div>
+              <div className="card-foot"><span>Línea: meta {DAILY_GOAL_HOURS}h por día</span><span>{fmtHours(stats.weekSeconds)} en total</span></div>
+            </article>
           </section>
 
-          <section className="recent-section"><div className="section-heading"><div><p className="eyebrow">HISTORIAL RECIENTE</p><h2>Últimos registros</h2></div><button className="link-button" onClick={() => setActiveTab('Tareas')}>Ver todas <span>→</span></button></div><div className="task-list">{recent.length === 0 && <p className="empty-list">Todavía no registraste nada. Escribí una tarea y tocá Empezar.</p>}{recent.map((task) => <TaskRow key={task.id} task={task} dateLabel={dayLabel(task.date, today)} onDelete={deleteTask} onRepeat={repeatTask} onToggleBillable={toggleBillable} />)}</div><button className="new-task-button" onClick={openManual}><Plus /> Cargar tiempo a mano</button></section>
+          <section className="recent-section">
+            <div className="panel-heading"><h3>Últimos registros</h3><button className="text-button" onClick={() => setActiveTab('Tareas')}>Ver todas →</button></div>
+            <div className="task-list">{recent.length === 0 && <p className="empty-list">Todavía no registraste nada. Escribí una tarea y tocá ▶.</p>}{recent.map((task) => <TaskRow key={task.id} task={task} dateLabel={dayLabel(task.date, today)} onDelete={deleteTask} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} />)}</div>
+            <button className="text-button add-manual" onClick={openManual}><Plus /> Cargar tiempo a mano</button>
+          </section>
         </>}
 
-        {activeTab === 'Tareas' && <TasksView tasks={tasks} today={today} onDelete={deleteTask} onRepeat={repeatTask} onToggleBillable={toggleBillable} onAddManual={openManual} />}
-        {activeTab === 'Estadísticas' && today && <StatsView tasks={tasks} clients={clients} today={today} />}
-        {activeTab === 'Clientes' && <ClientsView clients={clients} projects={projects} tasks={tasks} setClients={setClients} setProjects={setProjects} />}
+        {activeTab === 'Tareas' && <TasksView tasks={tasks} today={today} onDelete={deleteTask} onDeleteMany={deleteMany} onSetBillable={setBillable} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} onAddManual={openManual} />}
+        {activeTab === 'Estadísticas' && today && <StatsView tasks={tasks} payments={payments} projects={projects} clients={clients} goal={goal} today={today} onOpenGoals={() => setActiveTab('Metas')} />}
+        {activeTab === 'Clientes' && <ClientsView clients={clients} projects={projects} tasks={tasks} payments={payments} setClients={setClients} setProjects={setProjects} setTasks={setTasks} setPayments={setPayments} />}
+        {activeTab === 'Metas' && today && <GoalsView goal={goal} setGoal={setGoal} plan={plan} setPlan={setPlan} tasks={tasks} payments={payments} projects={projects} clients={clients} today={today} onStart={startPlanItem} />}
       </div>
 
-      <nav className="bottom-nav" aria-label="Navegación móvil">{TABS.map(({ id, icon: Icon }) => <button key={id} className={activeTab === id ? 'mobile-active' : ''} onClick={() => setActiveTab(id)}><Icon /><span>{id}</span></button>)}</nav>
+      <nav className="bottom-nav" aria-label="Navegación móvil">{TABS.map(({ id, icon: Icon }) => <button key={id} className={activeTab === id ? 'mobile-active' : ''} onClick={() => setActiveTab(id)}><Icon /><span>{id === 'Estadísticas' ? 'Stats' : id}</span></button>)}</nav>
 
       {manual && manualInfo && <div className="modal-backdrop" onClick={() => setManual(null)}><div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={() => setManual(null)} aria-label="Cerrar"><X /></button>
-        <p className="eyebrow">NUEVO REGISTRO</p><h2>Cargar tiempo a mano</h2>
-        <p>Sumá una tarea que ya hiciste para no perder ese trabajo.</p>
+        <h2>{manual.id ? 'Editar tarea' : 'Cargar tiempo a mano'}</h2>
+        {!manual.id && <p>Sumá una tarea que ya hiciste para no perder ese trabajo.</p>}
         <div className="form-grid">
           <label>Tarea<input autoFocus placeholder="¿Qué hiciste?" value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} /></label>
-          <div className="field"><span>Proyecto</span><ProjectPicker projects={projects} clients={clients} value={manual.projectId} onChange={(id) => { const p = projects.find((x) => x.id === id); setManual({ ...manual, projectId: id, billable: p ? p.rate > 0 : false }) }} onCreateProject={(p) => setProjects((cur) => [...cur, p])} /></div>
+          <div className="field"><span>Proyecto</span><ProjectPicker projects={projects} clients={clients} value={manual.projectId} onChange={(id) => setManual({ ...manual, projectId: id, billable: describeProject(id, projects, clients).rate > 0 })} onCreateProject={(p) => setProjects((cur) => [...cur, p])} /></div>
           <label>Etiquetas<input placeholder="diseño, reunión" value={manual.tags} onChange={(e) => setManual({ ...manual, tags: e.target.value })} /></label>
           <div className="modal-fields three"><label>Fecha<input type="date" value={manual.date} onChange={(e) => setManual({ ...manual, date: e.target.value })} /></label><label>Desde<input type="time" value={manual.from} onChange={(e) => setManual({ ...manual, from: e.target.value })} /></label><label>Hasta<input type="time" value={manual.to} onChange={(e) => setManual({ ...manual, to: e.target.value })} /></label></div>
-          <button type="button" className={`billable-toggle big wide ${manual.billable ? 'billable-on' : ''}`} onClick={() => setManual({ ...manual, billable: !manual.billable })} aria-pressed={manual.billable}><DollarSign /><span>{manual.billable ? (manualInfo.rate > 0 ? `Paga · ${manualInfo.rate} USD/h` : 'Paga · el proyecto no tiene tarifa') : 'No paga'}</span></button>
+          <label className="check-line"><input type="checkbox" checked={manual.billable} onChange={(e) => setManual({ ...manual, billable: e.target.checked })} /> Facturable{manual.billable && (manualRate > 0 ? ` · ${manualRate} USD/h` : ' · sin tarifa por hora')}</label>
         </div>
         {manualError && <p className="form-error">{manualError}</p>}
-        <button className="start-button full" onClick={saveManual}><Check /> Guardar registro</button>
+        <div className="modal-actions">
+          {manual.id && <button className="ghost-button danger-text" onClick={() => { const id = manual.id!; if (window.confirm('¿Borrar esta tarea?')) { setTasks((cur) => cur.filter((t) => t.id !== id)); setManual(null) } }}>Borrar</button>}
+          <button className="ghost-button" onClick={() => setManual(null)}>Cancelar</button>
+          <button className="primary-button" onClick={saveManual}><Check /> Guardar</button>
+        </div>
       </div></div>}
 
-      <div className="coin-layer" aria-hidden="true">{coins.map((c) => <span key={c.id} className="coin" style={{ left: `${c.left}%`, width: c.size, height: c.size, fontSize: c.size * 0.5, animationDelay: `${c.delay}s`, animationDuration: `${c.duration}s`, ['--dx' as string]: `${c.drift}px`, ['--spin' as string]: `${c.spin * 900}deg` }}>$</span>)}</div>
+      <div className="confetti" aria-hidden="true">{pieces.map((p) => <span key={p.id} className={p.round ? 'round' : ''} style={{ width: p.s, height: p.round ? p.s : p.s * 0.45, animationDelay: `${p.d}s`, ['--x' as string]: `${p.x}px`, ['--y' as string]: `${p.y}px`, ['--r' as string]: `${p.r}deg` }} />)}</div>
       <div className="toast-stack" role="status" aria-live="polite">{toasts.map((t) => <div className="toast" key={t.id}><strong>{t.title}</strong><span>{t.text}</span></div>)}</div>
     </main>
   )
