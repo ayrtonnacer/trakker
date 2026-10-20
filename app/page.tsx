@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BarChart3, Carrot, Check, DollarSign, ExternalLink, Home, ListChecks, Pickaxe, Play, Plus, Square, Tag, Target, Users, X } from 'lucide-react'
+import { BarChart3, Carrot, Cloud, CloudOff, Check, DollarSign, ExternalLink, Home, ListChecks, Pickaxe, Play, Plus, Square, Tag, Target, Users, X } from 'lucide-react'
 import {
   DAILY_GOAL_HOURS,
   XP_PER_USD,
@@ -38,6 +38,8 @@ import { ProjectPicker } from '@/components/tracker/project-picker'
 import { StatsView } from '@/components/tracker/stats-view'
 import { TaskRow } from '@/components/tracker/task-row'
 import { TasksView, dayLabel } from '@/components/tracker/tasks-view'
+import { STATUS_LABEL, SyncModal } from '@/components/tracker/sync-modal'
+import { useGitSync } from '@/lib/use-sync'
 
 // Se mantiene la clave de versiones anteriores para no perder los datos guardados.
 const STORAGE_KEY = 'tiempo-oro-v1'
@@ -109,9 +111,25 @@ export default function Page() {
   const [manualError, setManualError] = useState('')
   const [pieces, setPieces] = useState<Piece[]>([])
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [syncOpen, setSyncOpen] = useState(false)
   const timers = useRef<number[]>([])
 
   const running = active.startedAt !== null
+
+  // Los datos que se guardan como .md en GitHub (el timer en curso queda sólo en este navegador).
+  const data = useMemo(() => ({ tasks, clients, projects, payments, goal, plan }), [tasks, clients, projects, payments, goal, plan])
+  const sync = useGitSync({
+    loaded,
+    data,
+    apply: (d) => {
+      setTasks(d.tasks.map(migrateTask))
+      setClients(d.clients)
+      setProjects(d.projects)
+      setPayments(d.payments)
+      setGoal(d.goal)
+      setPlan(d.plan)
+    },
+  })
 
   // Carga inicial desde el navegador.
   useEffect(() => {
@@ -376,6 +394,7 @@ export default function Page() {
         </nav>
         <div className="header-actions">
           {running && activeTab !== 'Inicio' && <button className="running-pill" onClick={() => setActiveTab('Inicio')}><i /> {fmtClock(elapsed)}</button>}
+          <button className={`sync-button sync-${sync.status}`} onClick={() => setSyncOpen(true)} title={STATUS_LABEL[sync.status]} aria-label={STATUS_LABEL[sync.status]}>{sync.status === 'off' ? <CloudOff /> : <Cloud />}<span>{sync.status === 'off' ? 'Guardar en GitHub' : STATUS_LABEL[sync.status]}</span></button>
           <div className="avatar" title="Ayrton">AN</div>
         </div>
       </header>
@@ -494,6 +513,8 @@ export default function Page() {
           <button className="primary-button" onClick={saveManual}><Check /> Guardar</button>
         </div>
       </div></div>}
+
+      {syncOpen && <SyncModal cfg={sync.cfg} status={sync.status} message={sync.message} lastSync={sync.lastSync} onConnect={sync.connect} onDisconnect={sync.disconnect} onSyncNow={sync.syncNow} onClose={() => setSyncOpen(false)} />}
 
       <div className="confetti" aria-hidden="true">{pieces.map((p) => <span key={p.id} className={p.round ? 'round' : ''} style={{ width: p.s, height: p.round ? p.s : p.s * 0.45, animationDelay: `${p.d}s`, ['--x' as string]: `${p.x}px`, ['--y' as string]: `${p.y}px`, ['--r' as string]: `${p.r}deg` }} />)}</div>
       <div className="toast-stack" role="status" aria-live="polite">{toasts.map((t) => <div className="toast" key={t.id}><strong>{t.title}</strong><span>{t.text}</span></div>)}</div>

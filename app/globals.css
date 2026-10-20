@@ -505,3 +505,23 @@ a { color: inherit; }
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
   .confetti { display: none; }
 }
+
+/* ---------- guardado en GitHub ---------- */
+.sync-button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 6px; padding: 4px 8px; color: var(--muted); background: none; font-size: 12px; white-space: nowrap; }
+.sync-button:hover { border-color: var(--line-strong); color: var(--text); }
+.sync-button svg { width: 15px; height: 15px; }
+.sync-button.sync-error { color: var(--danger); }
+.sync-button.sync-saving, .sync-button.sync-pending, .sync-button.sync-connecting { color: var(--text); }
+.sync-status { display: flex; align-items: center; gap: 10px; margin: 14px 0; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--soft); }
+.sync-status strong { display: block; color: var(--strong); font-size: 14px; font-weight: 600; }
+.sync-status small { color: var(--muted); font-size: 12px; }
+.sync-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: var(--faint); }
+.sync-dot.sync-synced { background: var(--ok); }
+.sync-dot.sync-error { background: var(--danger); }
+.sync-dot.sync-saving, .sync-dot.sync-pending, .sync-dot.sync-connecting { background: #cb912f; animation: blink 1s infinite; }
+.sync-steps { margin: 0 0 4px; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.sync-steps li { margin-bottom: 6px; }
+.sync-steps b { color: var(--text); font-weight: 600; }
+.sync-steps code, .sync-note code { border-radius: 4px; padding: 1px 5px; background: var(--soft); font-size: 12px; }
+.modal-card > p.sync-note { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; }
+@media (max-width: 760px) { .sync-button span { display: none; } }
