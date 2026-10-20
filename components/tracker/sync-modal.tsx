@@ -26,7 +26,7 @@ export const STATUS_LABEL: Record<SyncStatus, string> = {
 }
 
 export function SyncModal({ cfg, status, message, lastSync, onConnect, onDisconnect, onSyncNow, onClose }: Props) {
-  const [form, setForm] = useState({ repo: cfg?.repo ?? '', branch: cfg?.branch ?? '', dir: cfg?.dir ?? '', token: '' })
+  const [form, setForm] = useState({ repo: cfg?.repo ?? '', token: '' })
   const [error, setError] = useState('')
   const [working, setWorking] = useState(false)
 
@@ -34,7 +34,8 @@ export function SyncModal({ cfg, status, message, lastSync, onConnect, onDisconn
     setError('')
     setWorking(true)
     try {
-      await onConnect(form)
+      // Siempre la rama principal y la raíz del repo.
+      await onConnect({ ...form, branch: '', dir: '' })
       setForm((f) => ({ ...f, token: '' }))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo conectar.')
@@ -75,10 +76,6 @@ export function SyncModal({ cfg, status, message, lastSync, onConnect, onDisconn
             <div className="form-grid">
               <label>Repo<input autoFocus value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} placeholder="usuario/trakker-datos" /></label>
               <label>Token de GitHub<input type="password" autoComplete="off" value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} placeholder="github_pat_…" /></label>
-              <div className="modal-fields two">
-                <label>Rama (opcional)<input value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} placeholder="la principal" /></label>
-                <label>Carpeta (opcional)<input value={form.dir} onChange={(e) => setForm({ ...form, dir: e.target.value })} placeholder="raíz del repo" /></label>
-              </div>
             </div>
             {(error || (status === 'error' && message)) && <p className="form-error">{error || message}</p>}
             <div className="modal-actions">
