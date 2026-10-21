@@ -1,4 +1,4 @@
-import { NO_CLIENT, NO_PROJECT, NO_PROJECT_COLOR, dateKey, type Client, type Payment, type Project, type Task } from './game'
+import { NO_CLIENT, NO_PROJECT, PERSONAL, NO_PROJECT_COLOR, dateKey, type Client, type Payment, type Project, type Task } from './game'
 
 export type Period = 'hoy' | 'semana' | 'mes' | 'año' | 'todo'
 
@@ -51,7 +51,7 @@ export function buildEntries(tasks: Task[], payments: Payment[], projects: Proje
     const p = projectId ? projectById.get(projectId) : undefined
     if (!p) return { project: fallbackProject, client: fallbackClient, color: fallbackColor }
     const c = p.clientId ? clientById.get(p.clientId) : undefined
-    return { project: p.name, client: c?.name ?? NO_CLIENT, color: p.color }
+    return { project: p.name, client: c?.name ?? PERSONAL, color: p.color }
   }
   const fromTasks = tasks.map((t) => ({
     date: t.date, seconds: t.seconds, amount: t.amount, billable: t.billable, projectId: t.projectId,

@@ -5,6 +5,10 @@ import { SyncError, checkRepo, diffFiles, parseFiles, pullAll, pushChanges, seri
 
 const CONFIG_KEY = 'tasker-sync'
 const DIRTY_KEY = 'tasker-sync-dirty'
+const PUSHED_AT_KEY = 'tasker-sync-pushed-at'
+// Justo después de subir, la API de GitHub puede devolver unos segundos la versión anterior.
+// En esa ventana no se confía en lo que llega del repo: si no, revive lo que se acaba de borrar.
+const STALE_WINDOW = 120000
 const PUSH_DELAY = 2500
 const PULL_EVERY = 20000
 
@@ -72,6 +76,7 @@ export function useGitSync({ loaded, data, apply }: { loaded: boolean; data: App
     try {
       await pushChanges(c, changes, shas.current)
       lastPushed.current = files
+      store.set(PUSHED_AT_KEY, String(Date.now()))
       setLastSync(Date.now())
       if (hasPending()) { set('pending'); schedule(PUSH_DELAY) } // cambió algo mientras se subía
       else { store.del(DIRTY_KEY); set('synced') }
@@ -116,7 +121,8 @@ export function useGitSync({ loaded, data, apply }: { loaded: boolean; data: App
         if (mode === 'connect') {
           useRemote = window.confirm('Hay datos en el repo y también en este navegador, y no coinciden.\n\nAceptar = usar los del repo (reemplaza los de este navegador)\nCancelar = subir los de este navegador (reemplaza los del repo)')
         } else if (mode === 'start' || mode === 'focus') {
-          useRemote = !dirty
+          const recentPush = Date.now() - Number(store.get(PUSHED_AT_KEY) || 0) < STALE_WINDOW
+          useRemote = !dirty && !recentPush
         }
       }
       lastPushed.current = remoteKnown
@@ -210,6 +216,7 @@ export function useGitSync({ loaded, data, apply }: { loaded: boolean; data: App
     window.clearTimeout(timer.current)
     store.del(CONFIG_KEY)
     store.del(DIRTY_KEY)
+    store.del(PUSHED_AT_KEY)
     cfgRef.current = null
     lastPushed.current = {}
     shas.current = {}

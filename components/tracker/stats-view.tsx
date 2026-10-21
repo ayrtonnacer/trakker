@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Clock3, DollarSign, Gauge, ListChecks, Target } from 'lucide-react'
-import { DAILY_GOAL_HOURS, dateKey, fmtHours, fmtMoney, fmtShort, goalTarget, monthEarnings, type Client, type Goal, type Payment, type Project, type Task } from '@/lib/game'
+import { dateKey, fmtHours, fmtMoney, fmtShort, goalTarget, monthEarnings, type Client, type Goal, type Payment, type Project, type Task } from '@/lib/game'
+import { GoalPanel } from './goal-panel'
 import { PERIODS, buildEntries, computeStats, groupEntries, type GroupBy, type Period } from '@/lib/stats'
 
 const GROUPS: { id: GroupBy; label: string }[] = [
@@ -14,7 +15,7 @@ const GROUPS: { id: GroupBy; label: string }[] = [
 
 type Metric = 'horas' | 'dinero'
 
-type Props = { tasks: Task[]; payments: Payment[]; projects: Project[]; clients: Client[]; goal: Goal | null; today: string; onOpenGoals: () => void }
+type Props = { tasks: Task[]; payments: Payment[]; projects: Project[]; clients: Client[]; goal: Goal | null; setGoal: (g: Goal | null) => void; today: string }
 
 /** Tope del eje redondeado a 1, 2 o 5 × 10ⁿ para que las marcas queden prolijas. */
 function niceMax(v: number) {
@@ -24,7 +25,7 @@ function niceMax(v: number) {
   return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p
 }
 
-export function StatsView({ tasks, payments, projects, clients, goal, today, onOpenGoals }: Props) {
+export function StatsView({ tasks, payments, projects, clients, goal, setGoal, today }: Props) {
   const [period, setPeriod] = useState<Period>('semana')
   const [offset, setOffset] = useState(0)
   const [metric, setMetric] = useState<Metric>('horas')
@@ -46,11 +47,11 @@ export function StatsView({ tasks, payments, projects, clients, goal, today, onO
   const value = (b: { seconds: number; amount: number }) => (money ? b.amount : b.seconds / 3600)
   const fmtValue = (v: number) => (money ? `$${fmtShort(Math.round(v))}` : `${Math.round(v * 10) / 10}h`)
 
-  // Meta del gráfico: horas por día, o ritmo de la meta de ingresos (mensual o repartida por día).
+  // Meta del gráfico: sólo en dinero, el ritmo de la meta de ingresos (mensual o repartida por día).
   const goalMonth = period === 'mes' ? dateKey(s.range.from).slice(0, 7) : today.slice(0, 7)
   const monthTarget = goalTarget(goal, goalMonth)
   const daysInMonth = new Date(Number(goalMonth.slice(0, 4)), Number(goalMonth.slice(5, 7)), 0).getDate()
-  const lineGoal = !s.byMonth ? (money ? (monthTarget ? monthTarget / daysInMonth : 0) : DAILY_GOAL_HOURS) : 0
+  const lineGoal = !s.byMonth && money && monthTarget ? monthTarget / daysInMonth : 0
   const binTargets = s.byMonth && money ? s.bins.map((b) => goalTarget(goal, b.key)) : []
 
   const maxBin = Math.max(...s.bins.map(value), lineGoal * 1.15, ...binTargets.map((t) => t * 1.05), 0)
@@ -71,7 +72,7 @@ export function StatsView({ tasks, payments, projects, clients, goal, today, onO
   return (
     <section className="view">
       <div className="view-heading">
-        <div><h2>Estadísticas</h2><p className="view-sub">Tiempo y plata por día, mes, cliente y proyecto. Los pagos de proyectos a precio fijo o por entrega se suman en la fecha en que los cobraste.</p></div>
+        <div><h2>Estadísticas</h2><p className="view-sub">Tiempo y plata por día, mes, cliente y proyecto. Los cobros de proyectos con presupuesto se suman en la fecha en que los cobraste. Abajo, tu meta de ingresos.</p></div>
         <div className="segmented" role="tablist" aria-label="Período">
           {PERIODS.map((p) => <button key={p.id} role="tab" aria-selected={period === p.id} className={period === p.id ? 'seg-on' : ''} onClick={() => { setPeriod(p.id); setOffset(0) }}>{p.label}</button>)}
         </div>
@@ -98,7 +99,7 @@ export function StatsView({ tasks, payments, projects, clients, goal, today, onO
         <div className="summary-card"><span><DollarSign /> Ganado</span><strong>US$ {fmtMoney(s.amount)}</strong><small>{s.paymentsAmount > 0 ? `incluye US$ ${fmtMoney(s.paymentsAmount)} en pagos` : 'por horas facturadas'}</small></div>
         <div className="summary-card"><span><Gauge /> Promedio diario</span><strong>{money ? `US$ ${fmtMoney(s.avgDailyAmount)}` : fmtHours(s.avgDaily)}</strong><small>{money ? `${fmtHours(s.avgDaily)} por día` : `US$ ${fmtMoney(s.avgDailyAmount)} por día`}</small></div>
         <div className="summary-card"><span><ListChecks /> Valor de tu hora</span><strong>US$ {fmtMoney(s.perHour)}</strong><small>{s.count} tarea{s.count === 1 ? '' : 's'} en el período</small></div>
-        <button className="summary-card goal-card" onClick={onOpenGoals}>
+        <button className="summary-card goal-card" onClick={() => document.getElementById('meta')?.scrollIntoView({ behavior: 'smooth' })}>
           <span><Target /> Meta de {goalMonth === today.slice(0, 7) ? 'este mes' : 'ese mes'}</span>
           {monthTarget ? <><strong>{goalPct}%</strong><div className="thin-track"><div style={{ width: `${goalPct}%` }} /></div><small>US$ {fmtShort(Math.round(monthEarned))} de {fmtShort(monthTarget)}</small></> : <><strong>—</strong><small>Definí una meta de ingresos →</small></>}
         </button>
@@ -112,7 +113,7 @@ export function StatsView({ tasks, payments, projects, clients, goal, today, onO
               <div className="schart-y">{ticks.map((t, i) => <span key={i}>{fmtValue(t)}</span>)}</div>
               <div className="schart-main">
                 <div className="schart-area">
-                  {lineGoal > 0 && <div className="schart-goal" style={{ bottom: `${(lineGoal / yMax) * 100}%` }}><span>{money ? `Ritmo meta $${fmtShort(Math.round(lineGoal))}/día` : `Meta ${DAILY_GOAL_HOURS}h`}</span></div>}
+                  {lineGoal > 0 && <div className="schart-goal" style={{ bottom: `${(lineGoal / yMax) * 100}%` }}><span>Ritmo meta ${fmtShort(Math.round(lineGoal))}/día</span></div>}
                   {s.bins.map((b, i) => {
                     const v = value(b)
                     const target = binTargets[i] ?? 0
@@ -156,6 +157,8 @@ export function StatsView({ tasks, payments, projects, clients, goal, today, onO
           )}
         </article>
       </div>
+
+      <GoalPanel goal={goal} setGoal={setGoal} tasks={tasks} payments={payments} today={today} />
     </section>
   )
 }

@@ -47,6 +47,8 @@ export type PlanItem = { id: string; date: string; text: string; projectId: stri
 
 export const CURRENCY = 'USD'
 export const NO_CLIENT = 'Sin cliente'
+/** Cómo se muestran los proyectos sin cliente: los propios (LinkedIn, CV, tu web). */
+export const PERSONAL = 'Personal'
 export const NO_PROJECT = 'Sin proyecto'
 export const NO_PROJECT_COLOR = '#9b9a97'
 
@@ -55,9 +57,9 @@ export const PALETTE = ['#2f6f9f', '#448361', '#9065b0', '#d9730d', '#c14c8a', '
 
 export const BILLING_LABEL: Record<Billing, string> = {
   hora: 'Por hora',
-  fijo: 'Precio fijo',
+  fijo: 'Presupuesto',
   entrega: 'Por entrega',
-  interno: 'Interno',
+  interno: 'Personal',
 }
 
 export const DAILY_GOAL_HOURS = 6
@@ -204,6 +206,11 @@ export function migrateTask(raw: Partial<Task> & { id: number; seconds: number; 
     billable: t.billable ?? t.amount > 0,
     rate,
   } as Task
+}
+
+/** Sin cliente = proyecto personal: suma tiempo, nunca plata. */
+export function migrateProject(p: Project): Project {
+  return p.clientId ? p : { ...p, billing: 'interno', rate: 0, price: 0 }
 }
 
 /** Total cobrado (horas + pagos) en el mes AAAA-MM. */

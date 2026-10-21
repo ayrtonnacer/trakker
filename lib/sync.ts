@@ -89,20 +89,14 @@ function clientsFile(d: AppData) {
 }
 
 function goalsFile(d: AppData) {
-  const out = ['# Metas y plan semanal', '']
+  const out = ['# Meta de ingresos y por hacer', '']
   const g = d.goal
   if (g) {
     out.push(`**Meta:** pasar de US$ ${g.baseline}/mes a +${g.pct}% en ${g.months} mes(es), desde ${g.start}.`, '')
     if (g.milestones.length) out.push(`Micro objetivos: ${g.milestones.join(', ')}`, '')
     if (g.actions.length) out.push('### Acciones', '', ...g.actions.map((a) => `- [${a.done ? 'x' : ' '}] ${a.text}`), '')
   } else out.push('Sin meta definida.', '')
-  if (d.plan.length) {
-    out.push('## Plan', '')
-    const days = [...new Set(d.plan.map((p) => p.date))].sort((a, b) => (a && !b ? -1 : !a && b ? 1 : a.localeCompare(b)))
-    days.forEach((day) => {
-      out.push(`### ${day || 'Backlog'}`, '', ...d.plan.filter((p) => p.date === day).map((p) => `- [${p.done ? 'x' : ' '}] ${p.text}${p.hours ? ` (${p.hours}h)` : ''}`), '')
-    })
-  }
+  if (d.plan.length) out.push('## Por hacer', '', ...d.plan.map((p) => `- [${p.done ? 'x' : ' '}] ${p.text}`), '')
   out.push(block(`{\n"goal": ${g ? json(g) : 'null'},\n"plan": ${lines(d.plan)}\n}`))
   return out.join('\n')
 }

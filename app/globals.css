@@ -329,7 +329,7 @@ a { color: inherit; }
 .group-list small { color: var(--faint); font-size: 11px; }
 
 /* ---------- clientes ---------- */
-.status-filter { margin-bottom: 14px; }
+.status-filter { margin: 0; }
 .client-list { display: flex; flex-direction: column; gap: 10px; }
 .client-card { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .client-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
@@ -562,3 +562,45 @@ a { color: inherit; }
 .backlog-panel .inline-add { margin-bottom: 8px; }
 .backlog-panel .inline-add select, .move-select { max-width: 150px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; color: var(--text); background: var(--surface); font-size: 12px; }
 .backlog-panel { margin-top: 12px; }
+
+/* Caja del timer: sugerencias del backlog y tareas para repetir */
+.timer-name-wrap { position: relative; display: flex; flex: 1; min-width: 0; }
+.suggest-menu { position: absolute; top: calc(100% + 10px); left: -8px; z-index: 30; width: min(460px, calc(100vw - 32px)); max-height: 360px; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 10px; padding: 6px; background: var(--surface); box-shadow: 0 12px 32px rgba(0,0,0,.28); }
+.suggest-title { display: flex; align-items: center; gap: 6px; padding: 8px 8px 4px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+.suggest-title svg { width: 13px; height: 13px; }
+.suggest-row { display: flex; align-items: center; gap: 4px; border-radius: 6px; }
+.suggest-row:hover { background: var(--hover); }
+.suggest-item { display: flex; flex: 1; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; border: 0; padding: 7px 8px; background: none; text-align: left; }
+.suggest-item span { overflow: hidden; max-width: 100%; color: var(--strong); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.suggest-item small { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+
+/* Racha, al estilo Duolingo: fueguito gris hasta que trabajás hoy */
+.streak-card { gap: 14px; }
+.streak-top { display: flex; align-items: center; gap: 12px; }
+.streak-flame { width: 38px; height: 38px; color: var(--faint); transition: color .3s; }
+.streak-card.lit .streak-flame { color: #ff9600; fill: #ffc800; }
+.streak-top strong { display: block; color: var(--strong); font-size: 30px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.streak-top span { color: var(--muted); font-size: 13px; }
+.streak-week { display: flex; justify-content: space-between; gap: 4px; }
+.streak-week span { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--faint); font-size: 11px; }
+.streak-week i { display: grid; place-items: center; width: 24px; height: 24px; border: 1.5px solid var(--line-strong); border-radius: 50%; }
+.streak-week .done i { border-color: #ff9600; color: #fff; background: #ff9600; }
+.streak-week .done i svg { width: 13px; height: 13px; stroke-width: 3; }
+.streak-week .today { color: var(--strong); font-weight: 600; }
+.streak-week .today:not(.done) i { border-style: dashed; border-color: #ff9600; }
+.streak-week .future i { opacity: .5; }
+.workspace-grid.single { grid-template-columns: 1fr; }
+
+/* Filtros de tareas y de clientes */
+.task-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -4px 0 14px; }
+.task-filters select, .date-range input { border: 1px solid var(--line-strong); border-radius: 6px; padding: 5px 8px; background: var(--surface); font-size: 13px; }
+.date-range { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.filter-total { margin: 0 0 14px; padding: 0 12px; color: var(--muted); font-size: 13px; }
+.filter-total b { color: var(--strong); font-weight: 600; }
+.backlog-group .day-head strong { color: var(--strong); }
+.clients-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+.clients-search .icon-button { width: 22px; height: 22px; }
+.paid-icon { width: 16px; height: 16px; flex: 0 0 auto; color: var(--accent); }
+.project-progress { align-items: flex-start; }
+.project-progress b { color: var(--strong); font-weight: 600; }
+.goal-panel { margin-top: 12px; }

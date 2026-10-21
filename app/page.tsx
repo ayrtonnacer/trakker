@@ -1,9 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, DollarSign, ExternalLink, Home, ListChecks, ListPlus, Pickaxe, Play, Plus, Square, Tag, Target, Users, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, DollarSign, ExternalLink, Flame, History, Home, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Square, Tag, Users, X } from 'lucide-react'
 import {
-  DAILY_GOAL_HOURS,
   buildTask,
   dateKey,
   describeProject,
@@ -13,6 +12,7 @@ import {
   fmtShort,
   goalTarget,
   goldFor,
+  migrateProject,
   migrateTask,
   milestonesFor,
   monthEarnings,
@@ -28,7 +28,6 @@ import {
   type Task,
 } from '@/lib/game'
 import { ClientsView } from '@/components/tracker/clients-view'
-import { GoalsView } from '@/components/tracker/goals-view'
 import { ProjectPicker } from '@/components/tracker/project-picker'
 import { StatsView } from '@/components/tracker/stats-view'
 import { TaskRow } from '@/components/tracker/task-row'
@@ -46,12 +45,11 @@ const TABS: { id: string; icon: typeof Home }[] = [
   { id: 'Tareas', icon: ListChecks },
   { id: 'Estadísticas', icon: BarChart3 },
   { id: 'Clientes', icon: Users },
-  { id: 'Metas', icon: Target },
 ]
 
 type Active = { base: number; startedAt: number | null; startTime?: string; target?: number } // target: segundos de la cuenta regresiva
 type Mode = { down: boolean; minutes: number }
-type Draft = { name: string; projectId: string | null; billable: boolean; tags: string }
+type Draft = { name: string; projectId: string | null; billable: boolean; tags: string; planId?: string } // planId: viene del backlog
 type Toast = { id: number; title: string; text: string }
 type Manual = { id?: number; rate?: number; name: string; projectId: string | null; billable: boolean; tags: string; date: string; from: string; to: string }
 type Piece = { id: number; x: number; y: number; r: number; d: number; s: number; round: boolean }
@@ -111,6 +109,7 @@ export default function Page() {
   const [pieces, setPieces] = useState<Piece[]>([])
   const [toasts, setToasts] = useState<Toast[]>([])
   const [syncOpen, setSyncOpen] = useState(false)
+  const [suggestOpen, setSuggestOpen] = useState(false)
   const timers = useRef<number[]>([])
 
   const running = active.startedAt !== null
@@ -123,7 +122,7 @@ export default function Page() {
     apply: (d) => {
       setTasks(d.tasks.map(migrateTask))
       setClients(d.clients)
-      setProjects(d.projects)
+      setProjects(d.projects.map(migrateProject))
       setPayments(d.payments)
       setGoal(d.goal)
       setPlan(d.plan)
@@ -142,7 +141,7 @@ export default function Page() {
         const saved = JSON.parse(raw)
         setTasks((saved.tasks ?? []).map(migrateTask))
         setClients(saved.clients ?? seed.clients)
-        setProjects(saved.projects ?? seed.projects)
+        setProjects((saved.projects ?? seed.projects).map(migrateProject))
         setPayments(saved.payments ?? [])
         setGoal(saved.goal ?? null)
         setPlan(saved.plan ?? [])
@@ -224,7 +223,8 @@ export default function Page() {
 
     return {
       todaySeconds, todayGold, week, weekSeconds,
-      weekMax: Math.max(DAILY_GOAL_HOURS * 3600 * 1.2, ...week.map((w) => w.secs)),
+      weekMax: Math.max(3600, ...week.map((w) => w.secs)) * 1.1,
+      weekDays: week.filter((w) => w.secs > 0).length,
       streak: streakFor(dates),
       monthEarned: monthEarnings(month, tasks, payments),
       monthTarget: goalTarget(goal, month),
@@ -283,19 +283,24 @@ export default function Page() {
   function saveForLater() {
     const text = draft.name.trim()
     if (!text) return
-    setPlan((cur) => [...cur, { id: uid(), date: '', text, projectId: draft.projectId, hours: 0, done: false }])
-    setDraft((d) => ({ ...d, name: '', tags: '' }))
+    if (!draft.planId) setPlan((cur) => [...cur, { id: uid(), date: '', text, projectId: draft.projectId, hours: 0, done: false }])
+    setDraft((d) => ({ ...d, name: '', tags: '', planId: undefined }))
     toast('Guardada en el backlog', text)
   }
 
-  function planToday(id: string) {
-    setPlan((cur) => cur.map((x) => (x.id === id ? { ...x, date: today } : x)))
+  function pickSuggestion(next: Draft) {
+    setDraft(next)
+    setSuggestOpen(false)
+  }
+
+  function removePlan(id: string) {
+    setPlan((cur) => cur.filter((x) => x.id !== id))
   }
 
   function discardTask() {
     if (elapsed > 0 && !window.confirm('¿Descartar la tarea en curso sin registrar el tiempo?')) return
     setActive({ base: 0, startedAt: null })
-    setDraft((d) => ({ ...d, name: '' }))
+    setDraft((d) => ({ ...d, name: '', planId: undefined }))
   }
 
   function stopTask() {
@@ -304,8 +309,10 @@ export default function Page() {
       name: draft.name, seconds: elapsed, projectId: draft.projectId, billable: draft.billable,
       tags: parseTags(draft.tags), date: dateKey(), start: active.startTime, projects, clients,
     }))
+    // Si venía del backlog, ya está hecha: sale de "por hacer".
+    if (draft.planId) removePlan(draft.planId)
     setActive({ base: 0, startedAt: null })
-    setDraft((d) => ({ ...d, name: '', tags: '' }))
+    setDraft((d) => ({ ...d, name: '', tags: '', planId: undefined }))
   }
 
   function startWith(next: Draft) {
@@ -325,7 +332,7 @@ export default function Page() {
 
   function startPlanItem(item: PlanItem) {
     const projectId = projects.some((p) => p.id === item.projectId) ? item.projectId : null
-    startWith({ name: item.text, projectId, billable: describeProject(projectId, projects, clients).rate > 0, tags: '' })
+    startWith({ name: item.text, projectId, billable: describeProject(projectId, projects, clients).rate > 0, tags: '', planId: item.id })
   }
 
   function setBillable(ids: number[], billable: boolean) {
@@ -391,8 +398,27 @@ export default function Page() {
   // Al editar, la tarifa congelada sigue valiendo mientras no cambie el proyecto.
   const manualRate = manual && manualInfo ? (manual.id && tasks.find((t) => t.id === manual.id)?.projectId === manual.projectId ? manual.rate ?? 0 : manualInfo.rate) : 0
   const recent = [...tasks].sort((a, b) => (b.date + (b.start ?? '')).localeCompare(a.date + (a.start ?? '')) || b.id - a.id).slice(0, 5)
-  const todayPlan = plan.filter((p) => p.date === today)
-  const backlogItems = plan.filter((p) => !p.date && !p.done)
+  // Backlog: todo lo pendiente, con o sin día (los días vienen del plan semanal de versiones anteriores).
+  const backlog = plan.filter((p) => !p.done)
+  // Sugerencias de la caja del timer: lo que está por hacer y tareas ya hechas para repetir, como plantilla.
+  const typed = draft.name.trim().toLowerCase()
+  const backlogMatches = backlog.filter((i) => !typed || i.text.toLowerCase().includes(typed)).slice(0, 6)
+  const templates = (() => {
+    const seen = new Set(backlog.map((i) => i.text.toLowerCase()))
+    const out: Task[] = []
+    for (const t of [...tasks].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)) {
+      const key = t.name.toLowerCase()
+      if (seen.has(key) || (typed && !key.includes(typed)) || key === typed) continue
+      seen.add(key)
+      out.push(t)
+      if (out.length >= 4) break
+    }
+    return out
+  })()
+  const weekWorked = stats.weekSeconds + elapsed
+  const weekAvg = weekWorked / Math.max(1, stats.weekDays + (elapsed > 0 && !stats.week.find((d) => d.isToday)?.secs ? 1 : 0))
+  const workedToday = stats.todaySeconds + elapsed > 0
+  const streak = stats.streak + (elapsed > 0 && stats.todaySeconds === 0 ? 1 : 0)
 
   // Barra de ganancias del mes: con meta, hasta la meta; sin meta, hasta el próximo número redondo.
   const monthLive = stats.monthEarned + liveGold
@@ -420,14 +446,37 @@ export default function Page() {
           <section className="welcome-row"><p className="eyebrow">{headerDate}</p><h1>Hola, Ayrton</h1></section>
 
           <section className={`timer-bar ${running ? 'is-running' : ''}`}>
-            <input className="timer-name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { if (running) stopTask(); else startTask() } }} maxLength={140} placeholder="¿En qué estás trabajando?" aria-label="Nombre de tarea" />
+            <div className="timer-name-wrap">
+              <input className="timer-name" value={draft.name} onChange={(e) => { setDraft({ ...draft, name: e.target.value, planId: undefined }); setSuggestOpen(true) }} onFocus={() => setSuggestOpen(true)} onBlur={() => setSuggestOpen(false)} onKeyDown={(e) => { if (e.key === 'Escape') setSuggestOpen(false); if (e.key === 'Enter') { setSuggestOpen(false); if (running) stopTask(); else startTask() } }} maxLength={140} placeholder={backlog.length ? `¿En qué estás trabajando? · ${backlog.length} por hacer` : '¿En qué estás trabajando?'} aria-label="Nombre de tarea" autoComplete="off" />
+              {suggestOpen && !running && (backlogMatches.length > 0 || templates.length > 0) && (
+                <div className="suggest-menu" onMouseDown={(e) => e.preventDefault()}>
+                  {backlogMatches.length > 0 && <div className="suggest-title"><ListTodo /> Por hacer</div>}
+                  {backlogMatches.map((i) => {
+                    const p = projects.find((x) => x.id === i.projectId)
+                    return (
+                      <div className="suggest-row" key={i.id}>
+                        <button className="suggest-item" onClick={() => pickSuggestion({ name: i.text, projectId: p ? p.id : null, billable: describeProject(p ? p.id : null, projects, clients).rate > 0, tags: '', planId: i.id })}><span>{i.text}</span>{p && <small><i className="dot" style={{ background: p.color }} /> {p.name}</small>}</button>
+                        <button className="icon-button" onClick={() => { setSuggestOpen(false); startPlanItem(i) }} aria-label={`Empezar “${i.text}”`} title="Empezar ya"><Play /></button>
+                      </div>
+                    )
+                  })}
+                  {templates.length > 0 && <div className="suggest-title"><History /> Repetir</div>}
+                  {templates.map((t) => (
+                    <div className="suggest-row" key={t.id}>
+                      <button className="suggest-item" onClick={() => pickSuggestion({ name: t.name, projectId: projects.some((p) => p.id === t.projectId) ? t.projectId : null, billable: t.billable, tags: t.tags.join(', ') })}><span>{t.name}</span><small><i className="dot" style={{ background: t.color }} /> {t.project}</small></button>
+                      <button className="icon-button" onClick={() => { setSuggestOpen(false); repeatTask(t) }} aria-label={`Empezar “${t.name}”`} title="Empezar ya"><Play /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="timer-controls">
               <ProjectPicker projects={projects} clients={clients} value={draft.projectId} onChange={pickProject} onCreateProject={(p) => setProjects((cur) => [...cur, p])} compact />
               <label className="tags-input"><Tag /><input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} placeholder="Etiquetas" aria-label="Etiquetas" /></label>
               <button className={`billable-toggle ${draft.billable ? 'billable-on' : ''}`} onClick={() => setDraft({ ...draft, billable: !draft.billable })} aria-pressed={draft.billable} title={draft.billable ? (info.rate > 0 ? `Facturable a ${info.rate} USD/h` : 'Facturable, pero sin tarifa por hora') : 'No facturable'} aria-label="Facturable"><DollarSign /></button>
               <button className={`billable-toggle ${mode.down ? 'billable-on' : ''}`} onClick={() => setMode((m) => ({ ...m, down: !m.down }))} disabled={running} aria-pressed={mode.down} title={mode.down ? 'Cuenta regresiva: tocá para contar hacia arriba' : 'Contando hacia arriba: tocá para usar cuenta regresiva'} aria-label="Modo del timer">{mode.down ? <ArrowDown /> : <ArrowUp />}</button>
               <span className="timer-clock" aria-live="off">{fmtClock(shown)}</span>
-              {!running && draft.name.trim() && <button className="icon-button" onClick={saveForLater} aria-label="Guardar en el backlog" title="Guardar en el backlog para hacerla después"><ListPlus /></button>}
+              {!running && draft.name.trim() && !draft.planId && <button className="icon-button" onClick={saveForLater} aria-label="Guardar en el backlog" title="Guardar en el backlog para hacerla después"><ListPlus /></button>}
               <button className={`play-button ${running ? 'stop' : ''}`} onClick={running ? stopTask : startTask} aria-label={running ? 'Terminar y registrar' : 'Empezar'} title={running ? 'Terminar y registrar' : 'Empezar'}>{running ? <Square /> : <Play />}</button>
               {elapsed > 0 && <button className="icon-button" onClick={discardTask} aria-label="Descartar" title="Descartar sin registrar"><X /></button>}
             </div>
@@ -436,14 +485,14 @@ export default function Page() {
             {!running && mode.down && <span className="countdown-presets">Cuenta regresiva: {PRESET_MINUTES.map((m) => <button key={m} className={mode.minutes === m ? 'preset-on' : ''} onClick={() => setMode({ down: true, minutes: m })}>{m} min</button>)}<input type="number" min={1} max={600} value={mode.minutes} onChange={(e) => setMode({ down: true, minutes: Math.min(600, Math.max(1, Math.round(Number(e.target.value)) || 1)) })} aria-label="Minutos" /> min</span>}
             {running && active.target && <span>Cuenta regresiva de {fmtHours(active.target)}: al llegar a cero se registra sola</span>}
             {running && liveGold > 0 && <span>+US$ {fmtMoney(liveGold)} · {info.rate} USD/h</span>}
-            {running && info.billing !== 'hora' && <span>{info.billing === 'interno' ? 'Proyecto interno: suma tiempo, no plata' : 'Se cobra por pagos: el tiempo te muestra cuánto rinde la hora'}</span>}
+            {running && info.billing !== 'hora' && <span>{info.billing === 'interno' ? 'Proyecto personal: suma tiempo, no plata' : 'Se cobra por pagos: el tiempo te muestra cuánto rinde la hora'}</span>}
             {info.client?.links?.map((l, i) => <a key={i} className="link-chip" href={l.url} target="_blank" rel="noreferrer noopener"><ExternalLink /> {l.label}</a>)}
             {!running && suggestedTags.length > 0 && <span className="tag-suggestions">{suggestedTags.map((t) => <button key={t} onClick={() => addTag(t)}>+ {t}</button>)}</span>}
           </div>
 
           <section className="hud-grid">
             <article className="card earnings-card">
-              <div className="card-label"><span>Ganado en {monthName}</span>{stats.monthTarget ? <span>Meta del mes US$ {fmtShort(stats.monthTarget)}</span> : <button className="text-button" onClick={() => setActiveTab('Metas')}>Definir meta</button>}</div>
+              <div className="card-label"><span>Ganado en {monthName}</span>{stats.monthTarget ? <span>Meta del mes US$ {fmtShort(stats.monthTarget)}</span> : <button className="text-button" onClick={() => { setActiveTab('Estadísticas'); window.setTimeout(() => document.getElementById('meta')?.scrollIntoView({ behavior: 'smooth' }), 50) }}>Definir meta</button>}</div>
               <div className="hero-number">US$ {fmtMoney(monthLive)}</div>
               <div className="carrot-track">
                 <div className="carrot-fill" style={{ width: `${Math.min(100, (monthLive / barTarget) * 100)}%` }} />
@@ -459,60 +508,31 @@ export default function Page() {
                 <span>Hoy US$ {fmtMoney(stats.todayGold + liveGold)}</span>
               </div>
             </article>
-            <article className="card today-card">
-              <div className="card-label"><span>Hoy</span><span>Racha {stats.streak} {stats.streak === 1 ? 'día' : 'días'}</span></div>
-              <div className="big-number">{fmtHours(stats.todaySeconds + elapsed)}</div>
-              <div className="thin-track"><div style={{ width: `${Math.min(100, ((stats.todaySeconds + elapsed) / 3600 / DAILY_GOAL_HOURS) * 100)}%` }} /></div>
-              <div className="card-foot"><span>Meta diaria {DAILY_GOAL_HOURS}h</span><span>Semana {fmtHours(stats.weekSeconds)}</span></div>
+            <article className={`card streak-card ${workedToday ? 'lit' : ''}`}>
+              <div className="streak-top">
+                <Flame className="streak-flame" />
+                <div><strong>{streak}</strong><span>{streak === 1 ? 'día de racha' : 'días de racha'}</span></div>
+              </div>
+              <div className="streak-week">
+                {stats.week.map((d) => {
+                  const done = d.secs > 0 || (d.isToday && elapsed > 0)
+                  return <span key={d.key} className={`${done ? 'done' : ''} ${d.isToday ? 'today' : ''} ${d.future ? 'future' : ''}`}><i>{done ? <Check /> : null}</i>{d.letter}</span>
+                })}
+              </div>
+              <div className="card-foot"><span>{workedToday ? <>Hoy <b>{fmtHours(stats.todaySeconds + elapsed)}</b></> : streak > 0 ? 'Registrá algo hoy para no perder la racha' : 'Registrá una tarea para empezar tu racha'}</span></div>
             </article>
           </section>
 
-          <section className="workspace-grid">
-            <article className="panel">
-              <div className="panel-heading"><h3>Plan de hoy</h3><button className="text-button" onClick={() => setActiveTab('Metas')}>Planificar semana →</button></div>
-              {todayPlan.length === 0 ? <p className="empty-list">No planificaste nada para hoy.{backlogItems.length > 0 ? ' Elegí algo del backlog.' : ' Escribí una tarea arriba y tocá guardar, o armá tu semana en Metas.'}</p> : (
-                <ul className="check-list">
-                  {todayPlan.map((i) => {
-                    const p = projects.find((x) => x.id === i.projectId)
-                    return (
-                      <li key={i.id} className={i.done ? 'done' : ''}>
-                        <button className={`pay-check ${i.done ? 'on' : ''}`} onClick={() => setPlan((cur) => cur.map((x) => (x.id === i.id ? { ...x, done: !x.done } : x)))} aria-label={i.done ? 'Marcar pendiente' : 'Marcar hecha'}>{i.done && <Check />}</button>
-                        <span>{i.text}{p && <small> · {p.name}</small>}{i.hours > 0 && <small> · {i.hours}h</small>}</span>
-                        <button className="icon-button" onClick={() => startPlanItem(i)} aria-label="Empezar timer" title="Empezar timer"><Play /></button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-              {backlogItems.length > 0 && (
-                <div className="backlog-block">
-                  <h4>Backlog <small>{backlogItems.length}</small></h4>
-                  <ul className="check-list">
-                    {backlogItems.slice(0, 5).map((i) => {
-                      const p = projects.find((x) => x.id === i.projectId)
-                      return (
-                        <li key={i.id}>
-                          <span>{i.text}{p && <small> · {p.name}</small>}</span>
-                          <button className="text-button" onClick={() => planToday(i.id)}>Hoy</button>
-                          <button className="icon-button" onClick={() => startPlanItem(i)} aria-label="Empezar timer" title="Empezar timer"><Play /></button>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                  {backlogItems.length > 5 && <button className="text-button" onClick={() => setActiveTab('Metas')}>Ver los {backlogItems.length} →</button>}
-                </div>
-              )}
-            </article>
+          <section className="workspace-grid single">
             <article className="panel">
               <div className="panel-heading"><h3>Esta semana</h3><button className="text-button" onClick={() => setActiveTab('Estadísticas')}>Estadísticas →</button></div>
               <div className="mini-chart">
-                <i className="mini-goal" style={{ bottom: `calc(19px + (100% - 19px) * ${(DAILY_GOAL_HOURS * 3600) / stats.weekMax})` }} />
                 {stats.week.map((d) => {
                   const secs = d.secs + (d.isToday ? elapsed : 0)
-                  return <div key={d.key} className={`mini-col ${d.isToday ? 'is-today' : ''}`} title={fmtHours(secs)}><div className="mini-bar-area"><div className={`mini-bar ${secs / 3600 >= DAILY_GOAL_HOURS ? 'hit' : ''}`} style={{ height: `${(secs / stats.weekMax) * 100}%` }} /></div><span>{d.letter}</span></div>
+                  return <div key={d.key} className={`mini-col ${d.isToday ? 'is-today' : ''}`} title={fmtHours(secs)}><div className="mini-bar-area"><div className="mini-bar" style={{ height: `${(secs / stats.weekMax) * 100}%` }} /></div><span>{d.letter}</span></div>
                 })}
               </div>
-              <div className="card-foot"><span>Línea: meta {DAILY_GOAL_HOURS}h por día</span><span>{fmtHours(stats.weekSeconds)} en total</span></div>
+              <div className="card-foot"><span>Promedio <b>{fmtHours(weekAvg)}</b> por día trabajado</span><span>{fmtHours(weekWorked)} en total</span></div>
             </article>
           </section>
 
@@ -523,10 +543,9 @@ export default function Page() {
           </section>
         </>}
 
-        {activeTab === 'Tareas' && <TasksView tasks={tasks} today={today} onDelete={deleteTask} onDeleteMany={deleteMany} onSetBillable={setBillable} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} onAddManual={openManual} />}
-        {activeTab === 'Estadísticas' && today && <StatsView tasks={tasks} payments={payments} projects={projects} clients={clients} goal={goal} today={today} onOpenGoals={() => setActiveTab('Metas')} />}
+        {activeTab === 'Tareas' && <TasksView tasks={tasks} backlog={backlog} projects={projects} clients={clients} onStartPlan={startPlanItem} onRemovePlan={removePlan} today={today} onDelete={deleteTask} onDeleteMany={deleteMany} onSetBillable={setBillable} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} onAddManual={openManual} />}
+        {activeTab === 'Estadísticas' && today && <StatsView tasks={tasks} payments={payments} projects={projects} clients={clients} goal={goal} setGoal={setGoal} today={today} />}
         {activeTab === 'Clientes' && <ClientsView clients={clients} projects={projects} tasks={tasks} payments={payments} setClients={setClients} setProjects={setProjects} setTasks={setTasks} setPayments={setPayments} />}
-        {activeTab === 'Metas' && today && <GoalsView goal={goal} setGoal={setGoal} plan={plan} setPlan={setPlan} tasks={tasks} payments={payments} projects={projects} clients={clients} today={today} onStart={startPlanItem} />}
       </div>
 
       <nav className="bottom-nav" aria-label="Navegación móvil">{TABS.map(({ id, icon: Icon }) => <button key={id} className={activeTab === id ? 'mobile-active' : ''} onClick={() => setActiveTab(id)}><Icon /><span>{id === 'Estadísticas' ? 'Stats' : id}</span></button>)}</nav>
