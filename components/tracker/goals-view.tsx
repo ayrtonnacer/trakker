@@ -38,7 +38,7 @@ type Props = {
   onStart: (item: PlanItem) => void
 }
 
-type GoalDraft = { baseline: string; pct: string; months: string; start: string; milestones: string }
+type GoalDraft = { baseline: string; pct: string; months: string; start: string; milestones: string; custom: boolean }
 
 function monthLabel(m: string) {
   const [y, mm] = m.split('-').map(Number)
@@ -51,13 +51,15 @@ export function GoalsView({ goal, setGoal, plan, setPlan, tasks, payments, proje
   const [action, setAction] = useState('')
   const [weekOffset, setWeekOffset] = useState(0)
   const [adding, setAdding] = useState<{ date: string; text: string; projectId: string; hours: string } | null>(null)
+  const [backlogText, setBacklogText] = useState('')
+  const [backlogProject, setBacklogProject] = useState('')
 
   const suggested = useMemo(() => suggestedBaseline(thisMonth, tasks, payments), [thisMonth, tasks, payments])
 
   function openDraft() {
     setDraft(goal
-      ? { baseline: String(goal.baseline), pct: String(goal.pct), months: String(goal.months), start: goal.start, milestones: goal.milestones.join(', ') }
-      : { baseline: suggested ? String(suggested) : '', pct: '20', months: '3', start: thisMonth, milestones: '' })
+      ? { baseline: String(goal.baseline), pct: String(goal.pct), months: String(goal.months), start: goal.start, milestones: goal.milestones.join(', '), custom: goal.milestones.length > 0 }
+      : { baseline: suggested ? String(suggested) : '', pct: '20', months: '3', start: thisMonth, milestones: '', custom: false })
   }
 
   function saveDraft() {
@@ -69,7 +71,7 @@ export function GoalsView({ goal, setGoal, plan, setPlan, tasks, payments, proje
       pct: Math.max(1, Number(draft.pct) || 0),
       months: Math.max(1, Math.round(Number(draft.months) || 1)),
       start: draft.start || thisMonth,
-      milestones: draft.milestones.split(/[,;\s]+/).map(parseAmount).filter((n) => n > 0),
+      milestones: !draft.custom ? [] : draft.milestones.split(/[,;\s]+/).map(parseAmount).filter((n) => n > 0),
       actions: goal?.actions ?? [],
     })
     setDraft(null)
@@ -114,12 +116,23 @@ export function GoalsView({ goal, setGoal, plan, setPlan, tasks, payments, proje
     setAdding({ ...adding, text: '', hours: '' })
   }
 
+  // ---- backlog: pendientes sin día asignado ----
+  const backlog = plan.filter((p) => !p.date)
+
+  function addBacklog() {
+    const text = backlogText.trim()
+    if (!text) return
+    setPlan((cur) => [...cur, { id: uid(), date: '', text, projectId: backlogProject || null, hours: 0, done: false }])
+    setBacklogText('')
+  }
+
   // ---- meta ----
   const months = goal ? Array.from({ length: goal.months + 1 }, (_, i) => addMonths(goal.start, i - 1)) : []
   const finalTarget = goal ? Math.round(goal.baseline * (1 + goal.pct / 100)) : 0
   const target = goalTarget(goal, thisMonth)
   const earned = monthEarnings(thisMonth, tasks, payments)
   const steps = milestonesFor(goal, target)
+  const previewTarget = draft ? Math.round(parseAmount(draft.baseline) * (1 + ((Number(draft.pct) || 0) / 100) / Math.max(1, Math.round(Number(draft.months) || 1)))) : 0
   const maxMonth = Math.max(finalTarget, ...months.map((m) => monthEarnings(m, tasks, payments)), 1)
 
   return (
@@ -185,6 +198,33 @@ export function GoalsView({ goal, setGoal, plan, setPlan, tasks, payments, proje
           )}
         </article>
       </div>
+
+      <article className="panel backlog-panel">
+        <div className="panel-heading"><h3>Backlog</h3><span className="muted">{backlog.length} pendiente{backlog.length === 1 ? '' : 's'}</span></div>
+        <div className="inline-add">
+          <input value={backlogText} onChange={(e) => setBacklogText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addBacklog()} placeholder="Ej. Actualizar mi perfil de LinkedIn" aria-label="Nueva tarea para el backlog" />
+          <select value={backlogProject} onChange={(e) => setBacklogProject(e.target.value)} aria-label="Proyecto"><option value="">Sin proyecto</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}{p.clientId ? ` · ${clients.find((c) => c.id === p.clientId)?.name ?? ''}` : ''}</option>)}</select>
+          <button className="ghost-button" onClick={addBacklog} disabled={!backlogText.trim()} aria-label="Agregar al backlog"><Plus /></button>
+        </div>
+        {backlog.length === 0 ? <p className="empty-list">Anotá acá lo que tenés que hacer, sin fecha ni tiempo. Después lo pasás a un día o lo arrancás con el timer.</p> : (
+          <ul className="check-list">
+            {backlog.map((i) => {
+              const p = projects.find((x) => x.id === i.projectId)
+              return (
+                <li key={i.id}>
+                  <span>{i.text}{p && <small> · {p.name}</small>}</span>
+                  <select className="move-select" value="" onChange={(e) => e.target.value && setPlan((cur) => cur.map((x) => (x.id === i.id ? { ...x, date: e.target.value } : x)))} aria-label="Pasar a un día">
+                    <option value="">Pasar a…</option>
+                    {week.map((d) => <option key={d.key} value={d.key}>{d.key === today ? 'Hoy' : `${d.label} ${d.day}`}</option>)}
+                  </select>
+                  <button className="icon-button" onClick={() => onStart(i)} aria-label="Empezar timer" title="Empezar timer"><Play /></button>
+                  <button className="icon-button danger" onClick={() => setPlan((cur) => cur.filter((x) => x.id !== i.id))} aria-label="Quitar"><X /></button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </article>
 
       <article className="panel plan-panel">
         <div className="panel-heading">
@@ -258,7 +298,17 @@ export function GoalsView({ goal, setGoal, plan, setPlan, tasks, payments, proje
                 <label>En meses<input inputMode="numeric" value={draft.months} onChange={(e) => setDraft({ ...draft, months: e.target.value })} /></label>
                 <label>Desde<input type="month" value={draft.start} onChange={(e) => setDraft({ ...draft, start: e.target.value })} /></label>
               </div>
-              <label>Micro objetivos del mes (opcional)<input value={draft.milestones} onChange={(e) => setDraft({ ...draft, milestones: e.target.value })} placeholder="Ej. 300, 600, 900 — si lo dejás vacío usamos 25%, 50% y 75%" /></label>
+              <div className="field">
+                <span>Micro objetivos de cada mes</span>
+                {!draft.custom ? (
+                  <small className="field-help">Ya vienen puestos: 25%, 50% y 75% de la meta de cada mes{previewTarget > 0 ? <> (el primer mes: <b>US$ {fmtShort(Math.round(previewTarget * 0.25))}, {fmtShort(Math.round(previewTarget * 0.5))} y {fmtShort(Math.round(previewTarget * 0.75))}</b>)</> : ''}. <button type="button" className="text-button" onClick={() => setDraft({ ...draft, custom: true })}>Personalizar</button></small>
+                ) : (
+                  <>
+                    <input value={draft.milestones} onChange={(e) => setDraft({ ...draft, milestones: e.target.value })} placeholder="Ej. 300, 600, 900" />
+                    <small className="field-help">Separados por coma. <button type="button" className="text-button" onClick={() => setDraft({ ...draft, custom: false, milestones: '' })}>Volver a 25 / 50 / 75%</button></small>
+                  </>
+                )}
+              </div>
               {parseAmount(draft.baseline) > 0 && <small className="field-help">Meta final: US$ {fmtShort(Math.round(parseAmount(draft.baseline) * (1 + (Number(draft.pct) || 0) / 100)))} por mes en {monthLabel(addMonths(draft.start || monthKey(), Math.max(1, Number(draft.months) || 1) - 1))}.</small>}
             </div>
             <div className="modal-actions">

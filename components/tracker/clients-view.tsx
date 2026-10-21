@@ -15,7 +15,6 @@ import {
   normalizeUrl,
   parseAmount,
   uid,
-  xpFor,
   type Billing,
   type Client,
   type ClientStatus,
@@ -155,7 +154,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
         const next = { ...t, project: name, client: clientName, color: data.color }
         if (!reprice) return next
         const amount = t.billable && hourlyNow > 0 ? goldFor(t.seconds, hourlyNow) : 0
-        return { ...next, rate: hourlyNow, amount, xp: xpFor(t.seconds, amount) }
+        return { ...next, rate: hourlyNow, amount }
       }))
     } else setProjects((cur) => [...cur, { id: uid(), ...data }])
     setProjectDraft(null)
@@ -201,7 +200,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
   return (
     <section className="view">
       <div className="view-heading">
-        <div><h2>Clientes y proyectos</h2><p className="view-sub">Guardá los links de cada cliente (plataforma de trabajo, pagos), cómo te paga y el estado de la relación. Para tareas propias como mejorar tu web o mandar propuestas, creá un proyecto <b>Interno</b>.</p></div>
+        <div><h2>Clientes y proyectos</h2><p className="view-sub">Guardá los links de cada cliente (plataforma de trabajo, pagos), cómo te paga y el estado de la relación. En <b>Personal / interno</b> van tus proyectos propios, sin cliente: actualizar tu LinkedIn, reescribir el CV, mejorar tu web.</p></div>
         <div className="heading-actions">
           <button className="ghost-button" onClick={() => { setProjectDraft({ name: '', clientId: '', billing: 'hora', rate: '', price: '', color: PALETTE[projects.length % PALETTE.length] }); setError('') }}><FolderPlus /> Nuevo proyecto</button>
           <button className="primary-button" onClick={newClient}><UserPlus /> Nuevo cliente</button>
@@ -225,9 +224,10 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
                 <button className="client-collapse" onClick={() => setCollapsed((c) => ({ ...c, [key]: !c[key] }))} aria-label={collapsed[key] ? 'Mostrar proyectos' : 'Ocultar proyectos'}>{collapsed[key] ? <ChevronRight /> : <ChevronDown />}</button>
                 <i className="client-avatar" style={{ color: client?.color ?? 'var(--muted)' }}>{(client?.name ?? '—').slice(0, 1).toUpperCase()}</i>
                 <div className="client-title">
-                  <strong>{client?.name ?? NO_CLIENT}{client && <span className={`status-pill status-${status}`}>{STATUSES.find((s) => s.id === status)!.label}</span>}</strong>
+                  <strong>{client?.name ?? 'Personal / interno'}{client && <span className={`status-pill status-${status}`}>{STATUSES.find((s) => s.id === status)!.label}</span>}</strong>
                   <span>{items.length} proyecto{items.length === 1 ? '' : 's'} · {fmtHours(tot.seconds)} · US$ {fmtMoney(tot.amount)}</span>
                 </div>
+                {!client && <div className="row-actions"><button className="icon-button" onClick={() => { setProjectDraft({ name: '', clientId: '', billing: 'interno', rate: '', price: '', color: PALETTE[projects.length % PALETTE.length] }); setError('') }} aria-label="Agregar proyecto personal" title="Agregar proyecto personal"><FolderPlus /></button></div>}
                 {client && <div className="row-actions">
                   <button className="icon-button" onClick={() => { setProjectDraft({ name: '', clientId: client.id, billing: 'hora', rate: '', price: '', color: client.color }); setError('') }} aria-label={`Agregar proyecto a ${client.name}`} title="Agregar proyecto"><FolderPlus /></button>
                   <button className="icon-button" onClick={() => { setClientDraft({ id: client.id, name: client.name, color: client.color, status, notes: client.notes ?? '', links: client.links?.length ? client.links : [{ label: '', url: '' }] }); setError('') }} aria-label={`Editar ${client.name}`} title="Editar"><Pencil /></button>
@@ -334,7 +334,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
             <h2>{projectDraft.id ? 'Editar proyecto' : 'Nuevo proyecto'}</h2>
             <div className="form-grid">
               <label>Nombre<input autoFocus value={projectDraft.name} onChange={(e) => setProjectDraft({ ...projectDraft, name: e.target.value })} placeholder="Ej. AI trainer" /></label>
-              <label>Cliente<select value={projectDraft.clientId} onChange={(e) => setProjectDraft({ ...projectDraft, clientId: e.target.value })}><option value="">{NO_CLIENT}</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+              <label>Cliente<select value={projectDraft.clientId} onChange={(e) => setProjectDraft({ ...projectDraft, clientId: e.target.value })}><option value="">Personal / interno (sin cliente)</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
               <div className="field"><span>Cómo se cobra</span>
                 <div className="segmented small wrap">{BILLINGS.map((b) => <button type="button" key={b} className={projectDraft.billing === b ? 'seg-on' : ''} onClick={() => setProjectDraft({ ...projectDraft, billing: b })}>{BILLING_LABEL[b]}</button>)}</div>
                 <small className="field-help">{BILLING_HELP[projectDraft.billing]}</small>

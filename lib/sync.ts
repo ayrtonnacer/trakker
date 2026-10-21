@@ -48,14 +48,14 @@ function tasksFile(month: string, tasks: Task[]) {
   const sorted = [...tasks].sort(byDateStart)
   const seconds = sorted.reduce((s, t) => s + t.seconds, 0)
   const amount = sorted.reduce((s, t) => s + t.amount, 0)
-  const rows = sorted.map((t) => `| ${t.date} | ${t.start ?? ''} | ${cell(t.name)} | ${cell(t.project)} | ${cell(t.client)} | ${fmtClock(t.seconds)} | ${t.billable ? 'sí' : 'no'} | ${t.amount.toFixed(2)} | ${t.xp} | ${cell(t.tags.join(', '))} |`)
+  const rows = sorted.map((t) => `| ${t.date} | ${t.start ?? ''} | ${cell(t.name)} | ${cell(t.project)} | ${cell(t.client)} | ${fmtClock(t.seconds)} | ${t.billable ? 'sí' : 'no'} | ${t.amount.toFixed(2)} | ${cell(t.tags.join(', '))} |`)
   return [
     `# Tareas ${month}`,
     '',
     `**${sorted.length} tareas · ${fmtClock(seconds)} · US$ ${fmtMoney(amount)}**`,
     '',
-    '| Fecha | Inicio | Tarea | Proyecto | Cliente | Duración | Facturable | US$ | XP | Etiquetas |',
-    '|---|---|---|---|---|---|---|---:|---:|---|',
+    '| Fecha | Inicio | Tarea | Proyecto | Cliente | Duración | Facturable | US$ | Etiquetas |',
+    '|---|---|---|---|---|---|---|---:|---|',
     ...rows,
     '',
     block(lines(sorted)),
@@ -77,7 +77,7 @@ function clientsFile(d: AppData) {
   }
   d.clients.forEach((c) => section(c.name, d.projects.filter((p) => p.clientId === c.id), c))
   const loose = d.projects.filter((p) => !p.clientId || !d.clients.some((c) => c.id === p.clientId))
-  if (loose.length) section('Sin cliente', loose)
+  if (loose.length) section('Personal / interno', loose)
   if (d.payments.length) {
     out.push('## Pagos', '', '| Fecha | Proyecto | Concepto | US$ | Estado |', '|---|---|---|---:|---|')
     const sorted = [...d.payments].sort((a, b) => a.date.localeCompare(b.date))
@@ -98,9 +98,9 @@ function goalsFile(d: AppData) {
   } else out.push('Sin meta definida.', '')
   if (d.plan.length) {
     out.push('## Plan', '')
-    const days = [...new Set(d.plan.map((p) => p.date))].sort()
+    const days = [...new Set(d.plan.map((p) => p.date))].sort((a, b) => (a && !b ? -1 : !a && b ? 1 : a.localeCompare(b)))
     days.forEach((day) => {
-      out.push(`### ${day}`, '', ...d.plan.filter((p) => p.date === day).map((p) => `- [${p.done ? 'x' : ' '}] ${p.text}${p.hours ? ` (${p.hours}h)` : ''}`), '')
+      out.push(`### ${day || 'Backlog'}`, '', ...d.plan.filter((p) => p.date === day).map((p) => `- [${p.done ? 'x' : ' '}] ${p.text}${p.hours ? ` (${p.hours}h)` : ''}`), '')
     })
   }
   out.push(block(`{\n"goal": ${g ? json(g) : 'null'},\n"plan": ${lines(d.plan)}\n}`))

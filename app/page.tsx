@@ -1,10 +1,9 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BarChart3, Carrot, Cloud, CloudOff, Check, DollarSign, ExternalLink, Home, ListChecks, Pickaxe, Play, Plus, Square, Tag, Target, Users, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, DollarSign, ExternalLink, Home, ListChecks, ListPlus, Pickaxe, Play, Plus, Square, Tag, Target, Users, X } from 'lucide-react'
 import {
   DAILY_GOAL_HOURS,
-  XP_PER_USD,
   buildTask,
   dateKey,
   describeProject,
@@ -14,17 +13,13 @@ import {
   fmtShort,
   goalTarget,
   goldFor,
-  levelFor,
   migrateTask,
   milestonesFor,
   monthEarnings,
-  nextRank,
   parseTags,
-  paymentXp,
-  rankFor,
   streakFor,
   timeKey,
-  xpFor,
+  uid,
   type Client,
   type Goal,
   type Payment,
@@ -54,12 +49,15 @@ const TABS: { id: string; icon: typeof Home }[] = [
   { id: 'Metas', icon: Target },
 ]
 
-type Active = { base: number; startedAt: number | null; startTime?: string }
+type Active = { base: number; startedAt: number | null; startTime?: string; target?: number } // target: segundos de la cuenta regresiva
+type Mode = { down: boolean; minutes: number }
 type Draft = { name: string; projectId: string | null; billable: boolean; tags: string }
 type Toast = { id: number; title: string; text: string }
 type Manual = { id?: number; rate?: number; name: string; projectId: string | null; billable: boolean; tags: string; date: string; from: string; to: string }
 type Piece = { id: number; x: number; y: number; r: number; d: number; s: number; round: boolean }
 
+const DEFAULT_MODE: Mode = { down: false, minutes: 30 }
+const PRESET_MINUTES = [15, 25, 30, 45, 60]
 const EMPTY_DRAFT: Draft = { name: '', projectId: null, billable: false, tags: '' }
 
 function seedData(today: string) {
@@ -105,6 +103,7 @@ export default function Page() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [goal, setGoal] = useState<Goal | null>(null)
   const [plan, setPlan] = useState<PlanItem[]>([])
+  const [mode, setMode] = useState<Mode>(DEFAULT_MODE)
   const [loaded, setLoaded] = useState(false)
   const [today, setToday] = useState('')
   const [manual, setManual] = useState<Manual | null>(null)
@@ -149,6 +148,7 @@ export default function Page() {
         setPlan(saved.plan ?? [])
         if (saved.active) setActive(saved.active)
         if (saved.draft) setDraft({ ...EMPTY_DRAFT, ...saved.draft })
+        if (saved.mode) setMode({ ...DEFAULT_MODE, ...saved.mode })
       } else {
         setTasks(seed.tasks)
         setClients(seed.clients)
@@ -171,11 +171,11 @@ export default function Page() {
   useEffect(() => {
     if (!loaded) return
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, payments, goal, plan, active, draft }))
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, payments, goal, plan, active, draft, mode }))
     } catch {
       // Sin almacenamiento (modo privado): la app sigue andando, sólo no recuerda.
     }
-  }, [loaded, tasks, clients, projects, payments, goal, plan, active, draft])
+  }, [loaded, tasks, clients, projects, payments, goal, plan, active, draft, mode])
 
   // El tiempo se calcula desde el inicio, así que sobrevive a pestañas en segundo plano.
   useEffect(() => {
@@ -184,13 +184,16 @@ export default function Page() {
     return () => window.clearInterval(id)
   }, [running])
 
-  const elapsed = Math.floor(active.base + (active.startedAt ? Math.max(0, now - active.startedAt) / 1000 : 0))
+  const rawElapsed = Math.floor(active.base + (active.startedAt ? Math.max(0, now - active.startedAt) / 1000 : 0))
+  // En cuenta regresiva el tiempo registrado nunca pasa de lo que se puso.
+  const elapsed = active.target ? Math.min(rawElapsed, active.target) : rawElapsed
+  const shown = active.target ? active.target - elapsed : mode.down && !running ? mode.minutes * 60 : elapsed
   const info = describeProject(draft.projectId, projects, clients)
   const liveGold = draft.billable && info.rate > 0 ? goldFor(elapsed, info.rate) : 0
 
   useEffect(() => {
-    document.title = running ? `${fmtClock(elapsed)} · ${draft.name || 'Tasker'}` : 'Tasker'
-  }, [running, elapsed, draft.name])
+    document.title = running ? `${fmtClock(shown)} · ${draft.name || 'Tasker'}` : 'Tasker'
+  }, [running, shown, draft.name])
 
   const suggestedTags = useMemo(() => {
     const count = new Map<string, number>()
@@ -199,14 +202,11 @@ export default function Page() {
     return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t).filter((t) => !current.has(t)).slice(0, 5)
   }, [tasks, draft.tags])
 
-  const totalXp = useMemo(() => tasks.reduce((s, t) => s + t.xp, 0) + payments.reduce((s, p) => s + paymentXp(p), 0), [tasks, payments])
-
   const stats = useMemo(() => {
     const todayTasks = tasks.filter((t) => t.date === today)
     const todaySeconds = todayTasks.reduce((s, t) => s + t.seconds, 0)
     const todayPaid = payments.filter((p) => p.paid && p.date === today).reduce((s, p) => s + p.amount, 0)
     const todayGold = todayTasks.reduce((s, t) => s + t.amount, 0) + todayPaid
-    const todayXp = todayTasks.reduce((s, t) => s + t.xp, 0) + payments.filter((p) => p.date === today).reduce((s, p) => s + paymentXp(p), 0)
     const dates = new Set(tasks.map((t) => t.date))
 
     const base = today ? new Date(`${today}T12:00:00`) : new Date(0)
@@ -223,16 +223,13 @@ export default function Page() {
     const month = today.slice(0, 7)
 
     return {
-      todaySeconds, todayGold, todayXp, week, weekSeconds,
+      todaySeconds, todayGold, week, weekSeconds,
       weekMax: Math.max(DAILY_GOAL_HOURS * 3600 * 1.2, ...week.map((w) => w.secs)),
       streak: streakFor(dates),
       monthEarned: monthEarnings(month, tasks, payments),
       monthTarget: goalTarget(goal, month),
     }
   }, [tasks, payments, goal, today])
-
-  const lvl = levelFor(totalXp)
-  const rankNext = nextRank(lvl.level)
 
   function toast(title: string, text: string) {
     const id = Date.now() + Math.random()
@@ -251,14 +248,11 @@ export default function Page() {
     timers.current.push(window.setTimeout(() => setPieces([]), 1300))
   }
 
-  /** Registra la tarea, festeja y avisa si subió de nivel. */
+  /** Registra la tarea y festeja. */
   function record(task: Task) {
-    const before = levelFor(totalXp).level
-    const after = levelFor(totalXp + task.xp).level
     setTasks((cur) => [task, ...cur])
     celebrate()
-    toast(`Tarea terminada · ${fmtHours(task.seconds)}`, `${task.amount > 0 ? `+US$ ${fmtMoney(task.amount)} · ` : ''}+${task.xp} XP · ${task.project}`)
-    if (after > before) toast(`Subiste al nivel ${after}`, rankFor(after))
+    toast(`Tarea terminada · ${fmtHours(task.seconds)}`, `${task.amount > 0 ? `+US$ ${fmtMoney(task.amount)} · ` : ''}${task.project}`)
   }
 
   function pickProject(projectId: string | null) {
@@ -274,7 +268,28 @@ export default function Page() {
   function startTask() {
     const t = Date.now()
     setNow(t)
-    setActive((a) => ({ ...a, startedAt: t, startTime: a.startTime ?? timeKey() }))
+    setActive((a) => ({ ...a, startedAt: t, startTime: a.startTime ?? timeKey(), target: a.target ?? (mode.down ? Math.max(1, mode.minutes) * 60 : undefined) }))
+  }
+
+  // Cuando la cuenta regresiva llega a cero se registra sola la tarea.
+  useEffect(() => {
+    if (!running || !active.target || rawElapsed < active.target) return
+    toast('Se terminó el tiempo', `${fmtHours(active.target)} · ${draft.name || 'Tarea sin título'}`)
+    stopTask()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, active.target, rawElapsed])
+
+  /** Guarda lo escrito en el backlog, sin empezar el timer. */
+  function saveForLater() {
+    const text = draft.name.trim()
+    if (!text) return
+    setPlan((cur) => [...cur, { id: uid(), date: '', text, projectId: draft.projectId, hours: 0, done: false }])
+    setDraft((d) => ({ ...d, name: '', tags: '' }))
+    toast('Guardada en el backlog', text)
+  }
+
+  function planToday(id: string) {
+    setPlan((cur) => cur.map((x) => (x.id === id ? { ...x, date: today } : x)))
   }
 
   function discardTask() {
@@ -298,7 +313,7 @@ export default function Page() {
     setDraft(next)
     const t = Date.now()
     setNow(t)
-    setActive({ base: 0, startedAt: t, startTime: timeKey() })
+    setActive({ base: 0, startedAt: t, startTime: timeKey(), target: mode.down ? Math.max(1, mode.minutes) * 60 : undefined })
     setActiveTab('Inicio')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -318,7 +333,7 @@ export default function Page() {
     setTasks((cur) => cur.map((t) => {
       if (!set.has(t.id)) return t
       const amount = billable && t.rate > 0 ? goldFor(t.seconds, t.rate) : 0
-      return { ...t, billable, amount, xp: xpFor(t.seconds, amount) }
+      return { ...t, billable, amount }
     }))
   }
 
@@ -328,7 +343,7 @@ export default function Page() {
   }
 
   function deleteTask(id: number) {
-    if (window.confirm('¿Borrar esta tarea? También baja el XP que dio.')) setTasks((cur) => cur.filter((t) => t.id !== id))
+    if (window.confirm('¿Borrar esta tarea?')) setTasks((cur) => cur.filter((t) => t.id !== id))
   }
 
   function deleteMany(ids: number[]) {
@@ -377,6 +392,7 @@ export default function Page() {
   const manualRate = manual && manualInfo ? (manual.id && tasks.find((t) => t.id === manual.id)?.projectId === manual.projectId ? manual.rate ?? 0 : manualInfo.rate) : 0
   const recent = [...tasks].sort((a, b) => (b.date + (b.start ?? '')).localeCompare(a.date + (a.start ?? '')) || b.id - a.id).slice(0, 5)
   const todayPlan = plan.filter((p) => p.date === today)
+  const backlogItems = plan.filter((p) => !p.date && !p.done)
 
   // Barra de ganancias del mes: con meta, hasta la meta; sin meta, hasta el próximo número redondo.
   const monthLive = stats.monthEarned + liveGold
@@ -393,7 +409,7 @@ export default function Page() {
           {TABS.map(({ id }) => <button key={id} className={activeTab === id ? 'nav-active' : ''} onClick={() => setActiveTab(id)}>{id}</button>)}
         </nav>
         <div className="header-actions">
-          {running && activeTab !== 'Inicio' && <button className="running-pill" onClick={() => setActiveTab('Inicio')}><i /> {fmtClock(elapsed)}</button>}
+          {running && activeTab !== 'Inicio' && <button className="running-pill" onClick={() => setActiveTab('Inicio')}><i /> {fmtClock(shown)}</button>}
           <button className={`sync-button sync-${sync.status}`} onClick={() => setSyncOpen(true)} title={STATUS_LABEL[sync.status]} aria-label={STATUS_LABEL[sync.status]}>{sync.status === 'off' ? <CloudOff /> : <Cloud />}<span>{sync.status === 'off' ? 'Guardar en GitHub' : STATUS_LABEL[sync.status]}</span></button>
           <div className="avatar" title="Ayrton">AN</div>
         </div>
@@ -409,50 +425,52 @@ export default function Page() {
               <ProjectPicker projects={projects} clients={clients} value={draft.projectId} onChange={pickProject} onCreateProject={(p) => setProjects((cur) => [...cur, p])} compact />
               <label className="tags-input"><Tag /><input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} placeholder="Etiquetas" aria-label="Etiquetas" /></label>
               <button className={`billable-toggle ${draft.billable ? 'billable-on' : ''}`} onClick={() => setDraft({ ...draft, billable: !draft.billable })} aria-pressed={draft.billable} title={draft.billable ? (info.rate > 0 ? `Facturable a ${info.rate} USD/h` : 'Facturable, pero sin tarifa por hora') : 'No facturable'} aria-label="Facturable"><DollarSign /></button>
-              <span className="timer-clock" aria-live="off">{fmtClock(elapsed)}</span>
+              <button className={`billable-toggle ${mode.down ? 'billable-on' : ''}`} onClick={() => setMode((m) => ({ ...m, down: !m.down }))} disabled={running} aria-pressed={mode.down} title={mode.down ? 'Cuenta regresiva: tocá para contar hacia arriba' : 'Contando hacia arriba: tocá para usar cuenta regresiva'} aria-label="Modo del timer">{mode.down ? <ArrowDown /> : <ArrowUp />}</button>
+              <span className="timer-clock" aria-live="off">{fmtClock(shown)}</span>
+              {!running && draft.name.trim() && <button className="icon-button" onClick={saveForLater} aria-label="Guardar en el backlog" title="Guardar en el backlog para hacerla después"><ListPlus /></button>}
               <button className={`play-button ${running ? 'stop' : ''}`} onClick={running ? stopTask : startTask} aria-label={running ? 'Terminar y registrar' : 'Empezar'} title={running ? 'Terminar y registrar' : 'Empezar'}>{running ? <Square /> : <Play />}</button>
               {elapsed > 0 && <button className="icon-button" onClick={discardTask} aria-label="Descartar" title="Descartar sin registrar"><X /></button>}
             </div>
           </section>
           <div className="timer-sub">
+            {!running && mode.down && <span className="countdown-presets">Cuenta regresiva: {PRESET_MINUTES.map((m) => <button key={m} className={mode.minutes === m ? 'preset-on' : ''} onClick={() => setMode({ down: true, minutes: m })}>{m} min</button>)}<input type="number" min={1} max={600} value={mode.minutes} onChange={(e) => setMode({ down: true, minutes: Math.min(600, Math.max(1, Math.round(Number(e.target.value)) || 1)) })} aria-label="Minutos" /> min</span>}
+            {running && active.target && <span>Cuenta regresiva de {fmtHours(active.target)}: al llegar a cero se registra sola</span>}
             {running && liveGold > 0 && <span>+US$ {fmtMoney(liveGold)} · {info.rate} USD/h</span>}
-            {running && info.billing !== 'hora' && <span>{info.billing === 'interno' ? 'Proyecto interno: suma tiempo y XP' : 'Se cobra por pagos: el tiempo te muestra cuánto rinde la hora'}</span>}
+            {running && info.billing !== 'hora' && <span>{info.billing === 'interno' ? 'Proyecto interno: suma tiempo, no plata' : 'Se cobra por pagos: el tiempo te muestra cuánto rinde la hora'}</span>}
             {info.client?.links?.map((l, i) => <a key={i} className="link-chip" href={l.url} target="_blank" rel="noreferrer noopener"><ExternalLink /> {l.label}</a>)}
             {!running && suggestedTags.length > 0 && <span className="tag-suggestions">{suggestedTags.map((t) => <button key={t} onClick={() => addTag(t)}>+ {t}</button>)}</span>}
           </div>
 
           <section className="hud-grid">
             <article className="card earnings-card">
-              <div className="card-label"><span>Ganado en {monthName}</span>{stats.monthTarget ? <span>Meta US$ {fmtShort(stats.monthTarget)}</span> : <button className="text-button" onClick={() => setActiveTab('Metas')}>Definir meta</button>}</div>
-              <div className="big-number">US$ {fmtMoney(monthLive)}</div>
+              <div className="card-label"><span>Ganado en {monthName}</span>{stats.monthTarget ? <span>Meta del mes US$ {fmtShort(stats.monthTarget)}</span> : <button className="text-button" onClick={() => setActiveTab('Metas')}>Definir meta</button>}</div>
+              <div className="hero-number">US$ {fmtMoney(monthLive)}</div>
               <div className="carrot-track">
                 <div className="carrot-fill" style={{ width: `${Math.min(100, (monthLive / barTarget) * 100)}%` }} />
-                {steps.map((m) => <i key={m} className={`track-mark ${monthLive >= m ? 'done' : ''}`} style={{ left: `${(m / barTarget) * 100}%` }} title={`US$ ${fmtShort(m)}`} />)}
-                {nextStep > 0 && <span className="carrot" style={{ left: `${Math.min(100, (nextStep / barTarget) * 100)}%` }} title={`Próximo: US$ ${fmtShort(nextStep)}`}><Carrot /></span>}
+                {steps.map((m, i) => <span key={m} className={`track-step ${monthLive >= m ? 'done' : ''}`} style={{ left: `${(m / barTarget) * 100}%` }}><i /><em className="step-tip">Micro objetivo {i + 1}: US$ {fmtShort(m)}</em></span>)}
+                {nextStep > 0 && <span className="carrot" style={{ left: `${Math.min(100, (nextStep / barTarget) * 100)}%` }}><Carrot /><em className="step-tip">Próximo: US$ {fmtShort(nextStep)}</em></span>}
+              </div>
+              <div className="step-labels" aria-hidden="true">
+                {steps.map((m) => <span key={m} className={monthLive >= m ? 'done' : ''} style={{ left: `${(m / barTarget) * 100}%` }}>{fmtShort(m)}</span>)}
+                {stats.monthTarget > 0 && <span className="step-end" style={{ left: '100%' }}>{fmtShort(stats.monthTarget)}</span>}
               </div>
               <div className="card-foot">
                 {nextStep > 0 ? <span>Faltan <b>US$ {fmtShort(Math.ceil((nextStep - monthLive) * 100) / 100)}</b> para llegar a {fmtShort(nextStep)}</span> : stats.monthTarget ? <span><b>¡Meta del mes cumplida!</b></span> : <span>Con una meta vas a ver micro objetivos en esta barra.</span>}
                 <span>Hoy US$ {fmtMoney(stats.todayGold + liveGold)}</span>
               </div>
             </article>
-            <article className="card">
+            <article className="card today-card">
               <div className="card-label"><span>Hoy</span><span>Racha {stats.streak} {stats.streak === 1 ? 'día' : 'días'}</span></div>
               <div className="big-number">{fmtHours(stats.todaySeconds + elapsed)}</div>
               <div className="thin-track"><div style={{ width: `${Math.min(100, ((stats.todaySeconds + elapsed) / 3600 / DAILY_GOAL_HOURS) * 100)}%` }} /></div>
               <div className="card-foot"><span>Meta diaria {DAILY_GOAL_HOURS}h</span><span>Semana {fmtHours(stats.weekSeconds)}</span></div>
-            </article>
-            <article className="card">
-              <div className="card-label"><span>Nivel {lvl.level} · {rankFor(lvl.level)}</span><span>+{stats.todayXp.toLocaleString('es-AR')} XP hoy</span></div>
-              <div className="big-number">{lvl.into.toLocaleString('es-AR')} <small>/ {lvl.need.toLocaleString('es-AR')} XP</small></div>
-              <div className="thin-track"><div style={{ width: `${Math.round((lvl.into / lvl.need) * 100)}%` }} /></div>
-              <div className="card-foot"><span>{rankNext ? `${rankNext.name} en nivel ${rankNext.level}` : 'Rango máximo'}</span><span title="1 minuto trabajado = 1 XP">US$ 1 = {XP_PER_USD} XP</span></div>
             </article>
           </section>
 
           <section className="workspace-grid">
             <article className="panel">
               <div className="panel-heading"><h3>Plan de hoy</h3><button className="text-button" onClick={() => setActiveTab('Metas')}>Planificar semana →</button></div>
-              {todayPlan.length === 0 ? <p className="empty-list">No planificaste nada para hoy. Armá tu semana en Metas.</p> : (
+              {todayPlan.length === 0 ? <p className="empty-list">No planificaste nada para hoy.{backlogItems.length > 0 ? ' Elegí algo del backlog.' : ' Escribí una tarea arriba y tocá guardar, o armá tu semana en Metas.'}</p> : (
                 <ul className="check-list">
                   {todayPlan.map((i) => {
                     const p = projects.find((x) => x.id === i.projectId)
@@ -465,6 +483,24 @@ export default function Page() {
                     )
                   })}
                 </ul>
+              )}
+              {backlogItems.length > 0 && (
+                <div className="backlog-block">
+                  <h4>Backlog <small>{backlogItems.length}</small></h4>
+                  <ul className="check-list">
+                    {backlogItems.slice(0, 5).map((i) => {
+                      const p = projects.find((x) => x.id === i.projectId)
+                      return (
+                        <li key={i.id}>
+                          <span>{i.text}{p && <small> · {p.name}</small>}</span>
+                          <button className="text-button" onClick={() => planToday(i.id)}>Hoy</button>
+                          <button className="icon-button" onClick={() => startPlanItem(i)} aria-label="Empezar timer" title="Empezar timer"><Play /></button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                  {backlogItems.length > 5 && <button className="text-button" onClick={() => setActiveTab('Metas')}>Ver los {backlogItems.length} →</button>}
+                </div>
               )}
             </article>
             <article className="panel">

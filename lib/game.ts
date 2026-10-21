@@ -30,7 +30,6 @@ export type Task = {
   rate: number // tarifa congelada al cerrar la tarea
   amount: number
   currency: string
-  xp: number
   color: string
   tags: string[]
   date: string // AAAA-MM-DD, hora local
@@ -43,6 +42,7 @@ export type Action = { id: string; text: string; done: boolean }
 /** Meta de ingresos: subir `pct`% sobre `baseline` (USD/mes) en `months` meses desde `start` (AAAA-MM). */
 export type Goal = { baseline: number; pct: number; months: number; start: string; milestones: number[]; actions: Action[] }
 
+/** date vacío = backlog: tarea pendiente sin día asignado. */
 export type PlanItem = { id: string; date: string; text: string; projectId: string | null; hours: number; done: boolean }
 
 export const CURRENCY = 'USD'
@@ -60,20 +60,7 @@ export const BILLING_LABEL: Record<Billing, string> = {
   interno: 'Interno',
 }
 
-export const RANKS: [number, string][] = [
-  [25, 'Leyenda'],
-  [15, 'Elite'],
-  [10, 'Experto'],
-  [6, 'Tasker Pro'],
-  [3, 'Tasker'],
-  [1, 'Aprendiz'],
-]
-
 export const DAILY_GOAL_HOURS = 6
-
-/** XP: 10 por cada dólar ganado y 1 por cada minuto trabajado (así el trabajo interno también suma). */
-export const XP_PER_USD = 10
-export const XP_PER_MINUTE = 1
 
 export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
@@ -100,34 +87,6 @@ export function billingOf(p: Project | null | undefined): Billing {
 /** Monto por tiempo = horas × tarifa, redondeado a 2 decimales. */
 export function goldFor(seconds: number, rate: number) {
   return Math.round((seconds / 3600) * rate * 100) / 100
-}
-
-export function xpFor(seconds: number, amount: number) {
-  return Math.round((seconds / 60) * XP_PER_MINUTE + amount * XP_PER_USD)
-}
-
-/** XP que pide pasar del nivel n al n+1. */
-export function xpForLevel(n: number) {
-  return Math.round(1000 * Math.pow(n, 1.25))
-}
-
-export function levelFor(totalXp: number) {
-  let level = 1
-  let left = totalXp
-  while (left >= xpForLevel(level)) {
-    left -= xpForLevel(level)
-    level++
-  }
-  return { level, into: left, need: xpForLevel(level) }
-}
-
-export function rankFor(level: number) {
-  return RANKS.find(([min]) => level >= min)![1]
-}
-
-export function nextRank(level: number) {
-  const next = [...RANKS].reverse().find(([min]) => min > level)
-  return next ? { level: next[0], name: next[1] } : null
 }
 
 export function streakFor(dates: Set<string>) {
@@ -197,7 +156,7 @@ export function describeProject(projectId: string | null, projects: Project[], c
   }
 }
 
-/** Arma una tarea cerrada. Si no factura por hora, suma tiempo y XP con monto 0. */
+/** Arma una tarea cerrada. Si no factura por hora, suma tiempo con monto 0. */
 export function buildTask(input: {
   id?: number
   name: string
@@ -225,7 +184,6 @@ export function buildTask(input: {
     rate,
     amount,
     currency: CURRENCY,
-    xp: xpFor(input.seconds, amount),
     color: info.color,
     tags: input.tags,
     date: input.date,
@@ -234,8 +192,10 @@ export function buildTask(input: {
   }
 }
 
-/** Completa tareas guardadas por versiones anteriores y recalcula el XP con la regla actual. */
-export function migrateTask(t: Partial<Task> & { id: number; seconds: number; amount: number }): Task {
+/** Completa tareas guardadas por versiones anteriores. */
+export function migrateTask(raw: Partial<Task> & { id: number; seconds: number; amount: number }): Task {
+  // Versiones anteriores guardaban XP: ya no se usa.
+  const { xp: _xp, ...t } = raw as typeof raw & { xp?: number }
   const rate = t.rate ?? (t.seconds ? Math.round((t.amount / (t.seconds / 3600)) * 100) / 100 : 0)
   return {
     name: 'Tarea sin título', client: NO_CLIENT, project: NO_PROJECT, projectId: null, currency: CURRENCY,
@@ -243,12 +203,7 @@ export function migrateTask(t: Partial<Task> & { id: number; seconds: number; am
     ...t,
     billable: t.billable ?? t.amount > 0,
     rate,
-    xp: xpFor(t.seconds, t.amount),
   } as Task
-}
-
-export function paymentXp(p: Payment) {
-  return p.paid ? Math.round(p.amount * XP_PER_USD) : 0
 }
 
 /** Total cobrado (horas + pagos) en el mes AAAA-MM. */
@@ -289,9 +244,12 @@ export function goalTarget(goal: Goal | null, month: string) {
   return Math.round(goal.baseline * (1 + (goal.pct / 100) * step))
 }
 
-/** Micro objetivos del mes: los que cargó el usuario o, si no hay, cuartos del objetivo. */
+/** Micro objetivos por defecto: 25%, 50% y 75% del objetivo. */
+export const DEFAULT_MILESTONES = [0.25, 0.5, 0.75]
+
+/** Micro objetivos del mes: los que cargó el usuario o, si no hay, el 25%, 50% y 75% del objetivo. */
 export function milestonesFor(goal: Goal | null, target: number) {
   const own = (goal?.milestones ?? []).filter((m) => m > 0 && m < target).sort((a, b) => a - b)
   if (own.length) return own
-  return target > 0 ? [0.25, 0.5, 0.75].map((f) => Math.round(target * f)) : []
+  return target > 0 ? DEFAULT_MILESTONES.map((f) => Math.round(target * f)) : []
 }
