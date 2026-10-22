@@ -1,12 +1,26 @@
 'use client'
 
 import { useMemo, useRef, useState } from 'react'
-import { Play, Plus, Search, Trash2, X } from 'lucide-react'
-import { PERSONAL, dateKey, fmtHours, fmtMoney, type Client, type PlanItem, type Project, type Task } from '@/lib/game'
+import { Check, Pencil, Play, Plus, Repeat, Search, Trash2, X } from 'lucide-react'
+import { PERSONAL, canBill, dateKey, fmtHours, fmtMoney, parseTags, uid, type Client, type PlanItem, type Project, type Routine, type Task } from '@/lib/game'
+import { ExportMenu } from './export-menu'
+import { ProjectPicker } from './project-picker'
 import { TaskRow } from './task-row'
 
 const WEEKDAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+// Lunes primero, como se piensa la semana. El número es el de Date.getDay().
+const WEEK: { day: number; letter: string }[] = [{ day: 1, letter: 'L' }, { day: 2, letter: 'M' }, { day: 3, letter: 'X' }, { day: 4, letter: 'J' }, { day: 5, letter: 'V' }, { day: 6, letter: 'S' }, { day: 0, letter: 'D' }]
+const WEEKDAYS_ONLY = [1, 2, 3, 4, 5]
+const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]
+
+type RoutineDraft = { id?: string; text: string; projectId: string | null; days: number[]; tags: string }
+
+function daysLabel(days: number[]) {
+  if (days.length === 7) return 'Todos los días'
+  if (days.length === 5 && WEEKDAYS_ONLY.every((d) => days.includes(d))) return 'Lunes a viernes'
+  return WEEK.filter((w) => days.includes(w.day)).map((w) => w.letter).join(' ')
+}
 
 export function dayLabel(date: string, today: string) {
   if (date === today) return 'Hoy'
@@ -44,6 +58,10 @@ function rangeKeys(range: Range, today: string, from: string, to: string): [stri
 type Props = {
   tasks: Task[]
   backlog: PlanItem[]
+  routines: Routine[]
+  setRoutines: (fn: (r: Routine[]) => Routine[]) => void
+  onStartRoutine: (r: Routine) => void
+  onCreateProject: (p: Project) => void
   projects: Project[]
   clients: Client[]
   onStartPlan: (item: PlanItem) => void
@@ -58,7 +76,7 @@ type Props = {
   onAddManual: () => void
 }
 
-export function TasksView({ tasks, backlog, projects, clients, onStartPlan, onRemovePlan, today, onDelete, onDeleteMany, onSetBillable, onRepeat, onEdit, onToggleBillable, onAddManual }: Props) {
+export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutine, onCreateProject, projects, clients, onStartPlan, onRemovePlan, today, onDelete, onDeleteMany, onSetBillable, onRepeat, onEdit, onToggleBillable, onAddManual }: Props) {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [query, setQuery] = useState('')
   const [range, setRange] = useState<Range>('todo')
@@ -67,6 +85,8 @@ export function TasksView({ tasks, backlog, projects, clients, onStartPlan, onRe
   const [projectId, setProjectId] = useState('')
   const [clientId, setClientId] = useState('')
   const lastClicked = useRef<number | null>(null)
+  const [routineDraft, setRoutineDraft] = useState<RoutineDraft | null>(null)
+  const [routineError, setRoutineError] = useState('')
 
   const q = query.trim().toLowerCase()
   const [fromKey, toKey] = rangeKeys(range, today, from, to)
@@ -125,6 +145,27 @@ export function TasksView({ tasks, backlog, projects, clients, onStartPlan, onRe
     setSelected(new Set())
   }
 
+  function saveRoutine() {
+    if (!routineDraft) return
+    const text = routineDraft.text.trim()
+    if (!text) return setRoutineError('Ponele un nombre a la rutina.')
+    if (!routineDraft.days.length) return setRoutineError('Elegí al menos un día.')
+    const data = { text, projectId: routineDraft.projectId, days: [...routineDraft.days].sort(), tags: parseTags(routineDraft.tags) }
+    if (routineDraft.id) setRoutines((cur) => cur.map((x) => (x.id === routineDraft.id ? { ...x, ...data } : x)))
+    else setRoutines((cur) => [...cur, { id: uid(), ...data }])
+    setRoutineDraft(null)
+  }
+
+  function removeRoutine(x: Routine) {
+    if (!window.confirm(`¿Borrar la rutina “${x.text}”? Las tareas ya registradas no cambian.`)) return
+    setRoutines((cur) => cur.filter((y) => y.id !== x.id))
+    setRoutineDraft(null)
+  }
+
+  const weekday = today ? new Date(`${today}T12:00:00`).getDay() : -1
+  const doneToday = new Set(tasks.filter((t) => t.date === today && t.routineId).map((t) => t.routineId))
+  const filterTitle = ['Tareas', clientId === 'personal' ? PERSONAL : clients.find((c) => c.id === clientId)?.name, projects.find((p) => p.id === projectId)?.name].filter(Boolean).join(' · ')
+
   const allVisibleSelected = ordered.length > 0 && ordered.every((id) => selected.has(id))
   const selTasks = tasks.filter((t) => selected.has(t.id))
   const selSeconds = selTasks.reduce((s, t) => s + t.seconds, 0)
@@ -132,8 +173,39 @@ export function TasksView({ tasks, backlog, projects, clients, onStartPlan, onRe
   return (
     <section className="view">
       <div className="view-heading">
-        <div><h2>Tareas</h2><p className="view-sub">Tocá una tarea para editarla y ▶ para repetirla, como plantilla. Marcá varias con la casilla (Shift + clic para un rango) para borrarlas o cambiar si se cobran de una vez.</p></div>
-        <button className="primary-button" onClick={onAddManual}><Plus /> Cargar tiempo a mano</button>
+        <div><h2>Tareas</h2><p className="view-sub">Tocá una tarea para editarla y agregarle una nota, y ▶ para repetirla, como plantilla. Marcá varias con la casilla (Shift + clic para un rango) para borrarlas o cambiar si se cobran de una vez.</p></div>
+        <div className="heading-actions">
+          <ExportMenu tasks={visible} title={filterTitle} />
+          <button className="primary-button" onClick={onAddManual}><Plus /> Cargar tiempo a mano</button>
+        </div>
+      </div>
+
+      <div className="day-group routines-group">
+        <div className="day-head"><strong><Repeat className="inline-icon" /> Rutinas</strong><button className="text-button" onClick={() => { setRoutineDraft({ text: '', projectId: null, days: WEEKDAYS_ONLY, tags: '' }); setRoutineError('') }}><Plus /> Nueva rutina</button></div>
+        {routines.length === 0 ? (
+          <p className="muted-line routines-empty">Tareas que se repiten, como “Mandar 5 solicitudes a reclutadores en LinkedIn”. Los días que tocan aparecen solas en la caja del timer, sin escribirlas.</p>
+        ) : (
+          <div className="task-list">
+            {routines.map((x) => {
+              const p = projects.find((y) => y.id === x.projectId)
+              const todays = x.days.includes(weekday)
+              const done = doneToday.has(x.id)
+              return (
+                <div className="task-row" key={x.id}>
+                  <button className="task-info" onClick={() => { setRoutineDraft({ id: x.id, text: x.text, projectId: x.projectId, days: x.days, tags: x.tags.join(', ') }); setRoutineError('') }} title="Editar rutina">
+                    <strong>{x.text}</strong>
+                    <span><i className="dot" style={{ background: p?.color ?? 'var(--faint)' }} /> {p?.name ?? 'Sin proyecto'} · {daysLabel(x.days)}</span>
+                  </button>
+                  <span className={`routine-state ${done ? 'routine-done' : ''}`}>{done ? <><Check /> Hecha hoy</> : todays ? 'Toca hoy' : 'Hoy no toca'}</span>
+                  <div className="row-actions">
+                    <button className="icon-button" onClick={() => onStartRoutine(x)} aria-label={`Empezar “${x.text}”`} title="Empezar"><Play /></button>
+                    <button className="icon-button hide-mobile" onClick={() => { setRoutineDraft({ id: x.id, text: x.text, projectId: x.projectId, days: x.days, tags: x.tags.join(', ') }); setRoutineError('') }} aria-label={`Editar “${x.text}”`} title="Editar"><Pencil /></button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {backlog.length > 0 && (
@@ -181,7 +253,7 @@ export function TasksView({ tasks, backlog, projects, clients, onStartPlan, onRe
               <label><input type="checkbox" checked={dayIds.every((id) => selected.has(id))} onChange={() => toggleMany(dayIds)} aria-label={`Seleccionar ${dayLabel(day, today)}`} /><strong>{dayLabel(day, today)}</strong></label>
               <span>{fmtHours(secs)}{amount > 0 && <> · US$ {fmtMoney(amount)}</>}</span>
             </div>
-            <div className="task-list">{ts.map((t) => <TaskRow key={t.id} task={t} dateLabel={dayLabel(day, today)} onDelete={onDelete} onRepeat={onRepeat} onEdit={onEdit} onToggleBillable={onToggleBillable} selected={selected.has(t.id)} onSelect={toggle} />)}</div>
+            <div className="task-list">{ts.map((t) => <TaskRow key={t.id} task={t} dateLabel={dayLabel(day, today)} onDelete={onDelete} onRepeat={onRepeat} onEdit={onEdit} onToggleBillable={onToggleBillable} billable={canBill(t.projectId, projects)} selected={selected.has(t.id)} onSelect={toggle} />)}</div>
           </div>
         )
       })}
@@ -192,8 +264,37 @@ export function TasksView({ tasks, backlog, projects, clients, onStartPlan, onRe
           <span className="bulk-meta">{fmtHours(selSeconds)}</span>
           <button onClick={() => onSetBillable(chosen, true)}>Facturable</button>
           <button onClick={() => onSetBillable(chosen, false)}>No facturable</button>
+          <ExportMenu tasks={selTasks} title={`${filterTitle} · selección`} />
           <button className="bulk-danger" onClick={removeSelected}><Trash2 /> Borrar</button>
           <button className="icon-button" onClick={() => setSelected(new Set())} aria-label="Quitar selección"><X /></button>
+        </div>
+      )}
+
+      {routineDraft && (
+        <div className="modal-backdrop" onClick={() => setRoutineDraft(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setRoutineDraft(null)} aria-label="Cerrar"><X /></button>
+            <h2>{routineDraft.id ? 'Editar rutina' : 'Nueva rutina'}</h2>
+            <p>Los días que elijas aparece sola en la caja del timer, en “Rutinas de hoy”, hasta que la registres. Así no la tenés que escribir.</p>
+            <div className="form-grid">
+              <label>Tarea<input autoFocus value={routineDraft.text} onChange={(e) => setRoutineDraft({ ...routineDraft, text: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && saveRoutine()} maxLength={140} placeholder="Mandar 5 solicitudes a reclutadores en LinkedIn" /></label>
+              <div className="field"><span>Proyecto</span><ProjectPicker projects={projects} clients={clients} value={routineDraft.projectId} onChange={(id) => setRoutineDraft({ ...routineDraft, projectId: id })} onCreateProject={onCreateProject} /></div>
+              <div className="field"><span>Días</span>
+                <div className="day-picker">{WEEK.map((w) => {
+                  const on = routineDraft.days.includes(w.day)
+                  return <button type="button" key={w.day} className={on ? 'day-on' : ''} aria-pressed={on} onClick={() => setRoutineDraft({ ...routineDraft, days: on ? routineDraft.days.filter((d) => d !== w.day) : [...routineDraft.days, w.day] })}>{w.letter}</button>
+                })}</div>
+                <div className="day-presets"><button type="button" className="text-button" onClick={() => setRoutineDraft({ ...routineDraft, days: WEEKDAYS_ONLY })}>Lunes a viernes</button><button type="button" className="text-button" onClick={() => setRoutineDraft({ ...routineDraft, days: EVERY_DAY })}>Todos los días</button></div>
+              </div>
+              <label>Etiquetas<input value={routineDraft.tags} onChange={(e) => setRoutineDraft({ ...routineDraft, tags: e.target.value })} placeholder="búsqueda, linkedin" /></label>
+            </div>
+            {routineError && <p className="form-error">{routineError}</p>}
+            <div className="modal-actions">
+              {routineDraft.id && <button className="ghost-button danger-text" onClick={() => removeRoutine(routines.find((x) => x.id === routineDraft.id)!)}>Borrar</button>}
+              <button className="ghost-button" onClick={() => setRoutineDraft(null)}>Cancelar</button>
+              <button className="primary-button" onClick={saveRoutine}>Guardar rutina</button>
+            </div>
+          </div>
         </div>
       )}
     </section>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, ChevronDown, ChevronRight, ExternalLink, FolderPlus, Pencil, Plus, Search, Trash2, UserPlus, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, ExternalLink, FolderPlus, IdCard, LayoutList, Mail, Pencil, Plus, Search, StickyNote, Trash2, UserPlus, Users, X } from 'lucide-react'
 import {
   BILLING_LABEL,
   NO_CLIENT,
@@ -22,8 +22,10 @@ import {
   type Link,
   type Payment,
   type Project,
+  type ProjectStatus,
   type Task,
 } from '@/lib/game'
+import { ExportMenu } from './export-menu'
 
 type Props = {
   clients: Client[]
@@ -36,8 +38,8 @@ type Props = {
   setPayments: (fn: (p: Payment[]) => Payment[]) => void
 }
 
-type ClientDraft = { id?: string; name: string; color: string; status: ClientStatus; notes: string; links: Link[] }
-type ProjectDraft = { id?: string; name: string; clientId: string; billing: Billing; rate: string; price: string; color: string }
+type ClientDraft = { id?: string; name: string; color: string; status: ClientStatus; notes: string; links: Link[]; contact: string; email: string; since: string }
+type ProjectDraft = { id?: string; name: string; clientId: string; billing: Billing; rate: string; price: string; color: string; status: ProjectStatus }
 type PaymentDraft = { projectId: string; label: string; amount: string; date: string }
 
 const STATUSES: { id: ClientStatus; label: string }[] = [
@@ -45,6 +47,14 @@ const STATUSES: { id: ClientStatus; label: string }[] = [
   { id: 'potencial', label: 'Potencial' },
   { id: 'pausado', label: 'Pausado' },
 ]
+const PROJECT_STATUSES: { id: ProjectStatus; label: string }[] = [
+  { id: 'activo', label: 'Activo' },
+  { id: 'pausado', label: 'Pausado' },
+  { id: 'terminado', label: 'Terminado' },
+]
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+const fmtDate = (d: string) => { const [y, m, day] = d.split('-').map(Number); return `${day} ${MONTHS[m - 1]} ${y}` }
+const statusOf = (p: Project): ProjectStatus => p.status ?? 'activo'
 // Como en Upwork: o cobrás por hora, o arreglás un presupuesto cerrado y vas registrando lo que te pagan.
 const BILLINGS: Billing[] = ['hora', 'fijo']
 const BILLING_HELP: Record<Billing, string> = {
@@ -71,6 +81,11 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
   const [statusFilter, setStatusFilter] = useState<ClientStatus | 'personal' | ''>('')
   const [query, setQuery] = useState('')
   const [error, setError] = useState('')
+  // Con muchos proyectos: por defecto sólo los activos, y se puede ver una lista plana filtrada por cliente.
+  const [layout, setLayout] = useState<'clientes' | 'proyectos'>('clientes')
+  const [projectStatus, setProjectStatus] = useState<ProjectStatus | ''>('activo')
+  const [clientFilter, setClientFilter] = useState('')
+  const [sheetId, setSheetId] = useState<string | null>(null)
 
   const projectTotals = (p: Project) => {
     const ts = tasks.filter((t) => t.projectId === p.id)
@@ -89,12 +104,22 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
     const loose = tasks.filter((t) => !t.projectId && t.client === (c?.name ?? NO_CLIENT))
     const ts = [...tasks.filter((t) => t.projectId && ids.has(t.projectId)), ...loose]
     const paid = payments.filter((x) => x.paid && x.projectId && ids.has(x.projectId)).reduce((s, x) => s + x.amount, 0)
-    return { seconds: ts.reduce((s, t) => s + t.seconds, 0), amount: ts.reduce((s, t) => s + t.amount, 0) + paid }
+    // Por cobrar: cobros pendientes y lo que falta de cada presupuesto.
+    const pending = own.reduce((s, p) => {
+      const ps = payments.filter((x) => x.projectId === p.id)
+      const got = ps.filter((x) => x.paid).reduce((a, x) => a + x.amount, 0)
+      const waiting = ps.filter((x) => !x.paid).reduce((a, x) => a + x.amount, 0)
+      return s + (billingOf(p) === 'fijo' ? Math.max(waiting, (p.price ?? 0) - got) : waiting)
+    }, 0)
+    return { seconds: ts.reduce((s, t) => s + t.seconds, 0), amount: ts.reduce((s, t) => s + t.amount, 0) + paid, pending, tasks: ts, projects: own }
   }
+
+  // Última vez que se trabajó en un proyecto: para ordenar la lista plana.
+  const lastWork = (projectId: string) => tasks.reduce((m, t) => (t.projectId === projectId && t.date > m ? t.date : m), '')
 
   // ---- clientes ----
   function newClient() {
-    setClientDraft({ name: '', color: PALETTE[clients.length % PALETTE.length], status: 'activo', notes: '', links: [{ label: '', url: '' }] })
+    setClientDraft({ name: '', color: PALETTE[clients.length % PALETTE.length], status: 'activo', notes: '', links: [{ label: '', url: '' }], contact: '', email: '', since: dateKey() })
     setError('')
   }
 
@@ -104,7 +129,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
     if (!name) return setError('Ponele un nombre al cliente.')
     if (clients.some((c) => c.id !== clientDraft.id && c.name.toLowerCase() === name.toLowerCase())) return setError(`Ya existe un cliente llamado “${name}”.`)
     const links = clientDraft.links.filter((l) => l.url.trim()).map((l) => ({ label: l.label.trim() || hostOf(l.url), url: normalizeUrl(l.url) }))
-    const data = { name, color: clientDraft.color, status: clientDraft.status, notes: clientDraft.notes.trim(), links }
+    const data = { name, color: clientDraft.color, status: clientDraft.status, notes: clientDraft.notes.trim(), links, contact: clientDraft.contact.trim(), email: clientDraft.email.trim(), since: clientDraft.since }
     if (clientDraft.id) {
       const old = clients.find((c) => c.id === clientDraft.id)
       setClients((cur) => cur.map((c) => (c.id === clientDraft.id ? { ...c, ...data } : c)))
@@ -118,16 +143,27 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
     setError('')
   }
 
+  function editClient(c: Client) {
+    setClientDraft({ id: c.id, name: c.name, color: c.color, status: c.status ?? 'activo', notes: c.notes ?? '', links: c.links?.length ? c.links : [{ label: '', url: '' }], contact: c.contact ?? '', email: c.email ?? '', since: c.since ?? '' })
+    setError('')
+  }
+
+  function newProject(clientId: string, color: string) {
+    setProjectDraft({ name: '', clientId, billing: clientId ? 'hora' : 'interno', rate: '', price: '', color, status: 'activo' })
+    setError('')
+  }
+
   function deleteClient(c: Client) {
     const n = projects.filter((p) => p.clientId === c.id).length
     if (!window.confirm(`¿Borrar el cliente “${c.name}”?${n ? ` Sus ${n} proyecto(s) quedan sin cliente.` : ''} Las tareas ya registradas no cambian.`)) return
     setClients((cur) => cur.filter((x) => x.id !== c.id))
+    setSheetId(null)
     setProjects((cur) => cur.map((p) => (p.clientId === c.id ? { ...p, clientId: null } : p)))
   }
 
   // ---- proyectos ----
   function editProject(p: Project) {
-    setProjectDraft({ id: p.id, name: p.name, clientId: p.clientId ?? '', billing: billingOf(p), rate: p.rate ? String(p.rate) : '', price: p.price ? String(p.price) : '', color: p.color })
+    setProjectDraft({ id: p.id, name: p.name, clientId: p.clientId ?? '', billing: billingOf(p), rate: p.rate ? String(p.rate) : '', price: p.price ? String(p.price) : '', color: p.color, status: statusOf(p) })
     setError('')
   }
 
@@ -140,7 +176,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
     const rate = billing === 'hora' || billing === 'entrega' ? parseAmount(projectDraft.rate) : 0
     const price = billing === 'fijo' ? parseAmount(projectDraft.price) : 0
     const clientId = projectDraft.clientId || null
-    const data = { name, clientId, rate, price, billing, color: projectDraft.color }
+    const data = { name, clientId, rate, price, billing, color: projectDraft.color, status: projectDraft.status }
     const clientName = clients.find((c) => c.id === clientId)?.name ?? NO_CLIENT
 
     if (projectDraft.id) {
@@ -199,39 +235,111 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
 
   const q = query.trim().toLowerCase()
   const match = (text: string) => !q || text.toLowerCase().includes(q)
-  const personal = projects.filter((p) => !p.clientId || !clients.some((c) => c.id === p.clientId))
+  const isPersonal = (p: Project) => !p.clientId || !clients.some((c) => c.id === p.clientId)
+  const personal = projects.filter(isPersonal)
+  const statusOk = (p: Project) => !projectStatus || statusOf(p) === projectStatus
+  const showClients = clientFilter ? (clientFilter === 'personal' ? [] : clients.filter((c) => c.id === clientFilter)) : statusFilter === 'personal' ? [] : clients.filter((c) => !statusFilter || (c.status ?? 'activo') === statusFilter)
+  const showPersonal = clientFilter ? clientFilter === 'personal' : !statusFilter || statusFilter === 'personal'
   const groups = [
-    ...(statusFilter === 'personal' ? [] : clients.filter((c) => !statusFilter || (c.status ?? 'activo') === statusFilter).map((c) => {
+    ...showClients.map((c) => {
       const own = projects.filter((p) => p.clientId === c.id)
       // Si coincide el cliente se ven todos sus proyectos; si no, sólo los que coinciden.
-      return { client: c as Client | null, items: match(c.name) ? own : own.filter((p) => match(p.name)) }
-    }).filter((g) => !q || match(g.client!.name) || g.items.length > 0)),
-    ...(statusFilter && statusFilter !== 'personal' ? [] : [{ client: null, items: personal.filter((p) => match(p.name) || match(PERSONAL)) }]),
+      const found = match(c.name) ? own : own.filter((p) => match(p.name))
+      return { client: c as Client | null, items: found.filter(statusOk), hidden: found.filter((p) => !statusOk(p)).length }
+    }).filter((g) => !q || match(g.client!.name) || g.items.length > 0),
+    ...(showPersonal ? [(() => { const found = personal.filter((p) => match(p.name) || match(PERSONAL)); return { client: null, items: found.filter(statusOk), hidden: found.filter((p) => !statusOk(p)).length } })()] : []),
   ]
+  // Lista plana de proyectos: lo más reciente arriba.
+  const flat = groups.flatMap((g) => g.items).sort((a, b) => lastWork(b.id).localeCompare(lastWork(a.id)) || a.name.localeCompare(b.name))
+  const sheet = sheetId ? clients.find((c) => c.id === sheetId) ?? null : null
   const counts = STATUSES.map((s) => ({ ...s, n: clients.filter((c) => (c.status ?? 'activo') === s.id).length }))
+
+  function renderProject(p: Project, withClient = false) {
+    const pt = projectTotals(p)
+    const st = statusOf(p)
+    const owner = clients.find((c) => c.id === p.clientId)
+    const billing = billingOf(p)
+    const usesPayments = billing === 'fijo' || billing === 'entrega'
+    const perHour = pt.seconds > 0 && pt.amount > 0 ? pt.amount / (pt.seconds / 3600) : 0
+    const price = p.price ?? 0
+    return (
+      <div className={`project-block ${st === 'terminado' ? 'project-done' : ''}`} key={p.id}>
+        <div className={`project-row ${withClient ? 'flat' : ''}`}>
+          <i className="dot" style={{ background: p.color }} />
+          <strong>{p.name}</strong>
+          {withClient && owner && <button className="text-button project-client" onClick={() => setSheetId(owner.id)} title="Ver ficha del cliente">{owner.name}</button>}
+          {st !== 'activo' && <span className={`status-pill status-${st}`}>{PROJECT_STATUSES.find((x) => x.id === st)!.label}</span>}
+          <span className="rate-badge">{billing === 'hora' ? (p.rate > 0 ? `${fmtShort(p.rate)} USD/h` : 'sin tarifa') : billing === 'fijo' ? `Presupuesto ${price ? `US$ ${fmtShort(price)}` : ''}` : billing === 'entrega' ? `${p.rate ? `US$ ${fmtShort(p.rate)} ` : ''}por entrega` : BILLING_LABEL[billing]}</span>
+          <span className="project-meta">{fmtHours(pt.seconds)}{billing !== 'interno' && <> · US$ {fmtMoney(pt.amount)}{perHour > 0 && billing !== 'hora' && <> · {fmtShort(Math.round(perHour * 100) / 100)}/h reales</>}</>}</span>
+          <div className="row-actions">
+            {usesPayments && <button className="text-button" onClick={() => setOpenPayments((o) => ({ ...o, [p.id]: !o[p.id] }))}>Cobros ({pt.payments.length})</button>}
+            <button className="icon-button" onClick={() => editProject(p)} aria-label={`Editar ${p.name}`} title="Editar"><Pencil /></button>
+            <button className="icon-button danger" onClick={() => deleteProject(p)} aria-label={`Borrar ${p.name}`} title="Borrar"><Trash2 /></button>
+          </div>
+        </div>
+        {billing === 'fijo' && (
+          <div className="project-progress">
+            {price > 0 && <div className="thin-track"><div style={{ width: `${Math.min(100, (pt.paid / price) * 100)}%` }} /></div>}
+            <small>{price > 0 ? <>Cobrado <b>US$ {fmtShort(pt.paid)}</b> de {fmtShort(price)}{price - pt.paid > 0 ? <> · falta cobrar <b>US$ {fmtShort(price - pt.paid)}</b></> : ' · cobrado completo'}</> : <>Cobrado US$ {fmtShort(pt.paid)} · poné el presupuesto total editando el proyecto</>}</small>
+            <button className="text-button" onClick={() => newPayment(p)}><Plus /> Registrar cobro</button>
+          </div>
+        )}
+        {usesPayments && openPayments[p.id] && (
+          <div className="payments">
+            {pt.payments.length === 0 && <p className="muted-line">Todavía no registraste cobros.</p>}
+            {[...pt.payments].sort((a, b) => a.date.localeCompare(b.date)).map((x) => (
+              <div className="payment-row" key={x.id}>
+                {x.paid ? <Check className="paid-icon" /> : <button className="pay-check" onClick={() => setPayments((cur) => cur.map((y) => (y.id === x.id ? { ...y, paid: true, date: dateKey() } : y)))} aria-label="Marcar como cobrado" title="Pendiente: tocá cuando lo cobres" />}
+                <span className="payment-label">{x.label}</span>
+                <span className="payment-date">{x.paid ? x.date.split('-').reverse().join('/') : 'pendiente'}</span>
+                <strong>US$ {fmtMoney(x.amount)}</strong>
+                <button className="icon-button danger" onClick={() => window.confirm(`¿Borrar “${x.label}”?`) && setPayments((cur) => cur.filter((y) => y.id !== x.id))} aria-label="Borrar cobro"><X /></button>
+              </div>
+            ))}
+            {billing === 'entrega' && <div className="payment-actions"><button className="text-button" onClick={() => newPayment(p)}><Plus /> Registrar cobro</button></div>}
+          </div>
+        )}
+      </div>
+    )
+
+  }
 
   return (
     <section className="view">
       <div className="view-heading">
         <div><h2>Clientes y proyectos</h2><p className="view-sub">Guardá los links de cada cliente (plataforma de trabajo, pagos), cómo te paga y el estado de la relación. En <b>Personal</b> van tus proyectos propios, sin cliente: actualizar tu LinkedIn, reescribir el CV, mejorar tu web. Suman tiempo, no plata.</p></div>
         <div className="heading-actions">
-          <button className="ghost-button" onClick={() => { setProjectDraft({ name: '', clientId: '', billing: 'interno', rate: '', price: '', color: PALETTE[projects.length % PALETTE.length] }); setError('') }}><FolderPlus /> Nuevo proyecto</button>
+          <button className="ghost-button" onClick={() => newProject('', PALETTE[projects.length % PALETTE.length])}><FolderPlus /> Nuevo proyecto</button>
           <button className="primary-button" onClick={newClient}><UserPlus /> Nuevo cliente</button>
         </div>
       </div>
 
       <div className="clients-toolbar">
-      <div className="segmented small status-filter" role="tablist" aria-label="Estado">
-        <button role="tab" aria-selected={!statusFilter} className={!statusFilter ? 'seg-on' : ''} onClick={() => setStatusFilter('')}>Todos <small>{clients.length}</small></button>
-        {counts.map((s) => <button key={s.id} role="tab" aria-selected={statusFilter === s.id} className={statusFilter === s.id ? 'seg-on' : ''} onClick={() => setStatusFilter(s.id)}>{s.label} <small>{s.n}</small></button>)}
-        <button role="tab" aria-selected={statusFilter === 'personal'} className={statusFilter === 'personal' ? 'seg-on' : ''} onClick={() => setStatusFilter('personal')}>{PERSONAL} <small>{personal.length}</small></button>
+        <div className="segmented small" role="tablist" aria-label="Vista">
+          <button role="tab" aria-selected={layout === 'clientes'} className={layout === 'clientes' ? 'seg-on' : ''} onClick={() => setLayout('clientes')}><Users /> Por cliente</button>
+          <button role="tab" aria-selected={layout === 'proyectos'} className={layout === 'proyectos' ? 'seg-on' : ''} onClick={() => setLayout('proyectos')}><LayoutList /> Proyectos</button>
+        </div>
+        <label className="search-input clients-search"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar cliente o proyecto" aria-label="Buscar cliente o proyecto" />{query && <button className="icon-button" onClick={() => setQuery('')} aria-label="Limpiar búsqueda"><X /></button>}</label>
       </div>
-      <label className="search-input clients-search"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar cliente o proyecto" aria-label="Buscar cliente o proyecto" />{query && <button className="icon-button" onClick={() => setQuery('')} aria-label="Limpiar búsqueda"><X /></button>}</label>
+      <div className="task-filters">
+        {!clientFilter && layout === 'clientes' && <div className="segmented small status-filter" role="tablist" aria-label="Estado del cliente">
+          <button role="tab" aria-selected={!statusFilter} className={!statusFilter ? 'seg-on' : ''} onClick={() => setStatusFilter('')}>Todos <small>{clients.length}</small></button>
+          {counts.map((s) => <button key={s.id} role="tab" aria-selected={statusFilter === s.id} className={statusFilter === s.id ? 'seg-on' : ''} onClick={() => setStatusFilter(s.id)}>{s.label} <small>{s.n}</small></button>)}
+          <button role="tab" aria-selected={statusFilter === 'personal'} className={statusFilter === 'personal' ? 'seg-on' : ''} onClick={() => setStatusFilter('personal')}>{PERSONAL} <small>{personal.length}</small></button>
+        </div>}
+        <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} aria-label="Filtrar por cliente"><option value="">Todos los clientes</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}<option value="personal">{PERSONAL}</option></select>
+        <select value={projectStatus} onChange={(e) => setProjectStatus(e.target.value as ProjectStatus | '')} aria-label="Estado de los proyectos"><option value="activo">Proyectos activos</option><option value="pausado">Proyectos pausados</option><option value="terminado">Proyectos terminados</option><option value="">Todos los proyectos</option></select>
+        {(clientFilter || projectStatus !== 'activo' || statusFilter) && <button className="text-button" onClick={() => { setClientFilter(''); setProjectStatus('activo'); setStatusFilter('') }}><X /> Limpiar</button>}
       </div>
 
+      {layout === 'proyectos' ? (
+        <div className="client-card project-list">
+          {flat.length === 0 ? <p className="muted-line">No hay proyectos con estos filtros.</p> : flat.map((p) => renderProject(p, true))}
+        </div>
+      ) : (
       <div className="client-list">
-        {groups.map(({ client, items }) => {
-          if (!client && items.length === 0) return null
+        {groups.map(({ client, items, hidden }) => {
+          if (!client && items.length === 0 && hidden === 0) return null
           const key = client?.id ?? 'none'
           const tot = clientTotals(client)
           const status = client?.status ?? 'activo'
@@ -239,71 +347,30 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
             <div className="client-card" key={key}>
               <div className="client-head">
                 <button className="client-collapse" onClick={() => setCollapsed((c) => ({ ...c, [key]: !c[key] }))} aria-label={collapsed[key] ? 'Mostrar proyectos' : 'Ocultar proyectos'}>{collapsed[key] ? <ChevronRight /> : <ChevronDown />}</button>
-                <i className="client-avatar" style={{ color: client?.color ?? 'var(--muted)' }}>{(client?.name ?? '—').slice(0, 1).toUpperCase()}</i>
-                <div className="client-title">
-                  <strong>{client?.name ?? PERSONAL}{client && <span className={`status-pill status-${status}`}>{STATUSES.find((s) => s.id === status)!.label}</span>}</strong>
-                  <span>{items.length} proyecto{items.length === 1 ? '' : 's'} · {fmtHours(tot.seconds)}{client && <> · US$ {fmtMoney(tot.amount)}</>}</span>
-                </div>
-                {!client && <div className="row-actions"><button className="icon-button" onClick={() => { setProjectDraft({ name: '', clientId: '', billing: 'interno', rate: '', price: '', color: PALETTE[projects.length % PALETTE.length] }); setError('') }} aria-label="Agregar proyecto personal" title="Agregar proyecto personal"><FolderPlus /></button></div>}
+                {client ? (
+                  <button className="client-open" onClick={() => setSheetId(client.id)} title="Ver ficha del cliente">
+                    <i className="client-avatar" style={{ color: client.color }}>{client.name.slice(0, 1).toUpperCase()}</i>
+                    <div className="client-title">
+                      <strong>{client.name}<span className={`status-pill status-${status}`}>{STATUSES.find((s) => s.id === status)!.label}</span></strong>
+                      <span>{items.length} proyecto{items.length === 1 ? '' : 's'}{projectStatus ? ` ${PROJECT_STATUSES.find((x) => x.id === projectStatus)!.label.toLowerCase()}${items.length === 1 ? '' : 's'}` : ''} · {fmtHours(tot.seconds)} · US$ {fmtMoney(tot.amount)}</span>
+                    </div>
+                  </button>
+                ) : <>
+                  <i className="client-avatar" style={{ color: 'var(--muted)' }}>—</i>
+                  <div className="client-title"><strong>{PERSONAL}</strong><span>{items.length} proyecto{items.length === 1 ? '' : 's'} · {fmtHours(tot.seconds)}</span></div>
+                </>}
+                {!client && <div className="row-actions"><button className="icon-button" onClick={() => newProject('', PALETTE[projects.length % PALETTE.length])} aria-label="Agregar proyecto personal" title="Agregar proyecto personal"><FolderPlus /></button></div>}
                 {client && <div className="row-actions">
-                  <button className="icon-button" onClick={() => { setProjectDraft({ name: '', clientId: client.id, billing: 'hora', rate: '', price: '', color: client.color }); setError('') }} aria-label={`Agregar proyecto a ${client.name}`} title="Agregar proyecto"><FolderPlus /></button>
-                  <button className="icon-button" onClick={() => { setClientDraft({ id: client.id, name: client.name, color: client.color, status, notes: client.notes ?? '', links: client.links?.length ? client.links : [{ label: '', url: '' }] }); setError('') }} aria-label={`Editar ${client.name}`} title="Editar"><Pencil /></button>
-                  <button className="icon-button danger" onClick={() => deleteClient(client)} aria-label={`Borrar ${client.name}`} title="Borrar"><Trash2 /></button>
+                  <button className="icon-button" onClick={() => setSheetId(client.id)} aria-label={`Ficha de ${client.name}`} title="Ver ficha"><IdCard /></button>
+                  <button className="icon-button" onClick={() => newProject(client.id, client.color)} aria-label={`Agregar proyecto a ${client.name}`} title="Agregar proyecto"><FolderPlus /></button>
+                  <button className="icon-button hide-mobile" onClick={() => editClient(client)} aria-label={`Editar ${client.name}`} title="Editar"><Pencil /></button>
                 </div>}
               </div>
-              {client && (client.links?.length || client.notes) ? (
-                <div className="client-extra">
-                  {client.links?.map((l, i) => <a key={i} className="link-chip" href={l.url} target="_blank" rel="noreferrer noopener"><ExternalLink /> {l.label}</a>)}
-                  {client.notes && <p className="client-notes">{client.notes}</p>}
-                </div>
-              ) : null}
               {!collapsed[key] && (
                 <div className="project-rows">
-                  {items.length === 0 && <p className="muted-line">Sin proyectos. Tocá <FolderPlus className="inline-icon" /> para agregar uno.</p>}
-                  {items.map((p) => {
-                    const pt = projectTotals(p)
-                    const billing = billingOf(p)
-                    const usesPayments = billing === 'fijo' || billing === 'entrega'
-                    const perHour = pt.seconds > 0 && pt.amount > 0 ? pt.amount / (pt.seconds / 3600) : 0
-                    const price = p.price ?? 0
-                    return (
-                      <div className="project-block" key={p.id}>
-                        <div className="project-row">
-                          <i className="dot" style={{ background: p.color }} />
-                          <strong>{p.name}</strong>
-                          <span className="rate-badge">{billing === 'hora' ? (p.rate > 0 ? `${fmtShort(p.rate)} USD/h` : 'sin tarifa') : billing === 'fijo' ? `Presupuesto ${price ? `US$ ${fmtShort(price)}` : ''}` : billing === 'entrega' ? `${p.rate ? `US$ ${fmtShort(p.rate)} ` : ''}por entrega` : BILLING_LABEL[billing]}</span>
-                          <span className="project-meta">{fmtHours(pt.seconds)}{billing !== 'interno' && <> · US$ {fmtMoney(pt.amount)}{perHour > 0 && billing !== 'hora' && <> · {fmtShort(Math.round(perHour * 100) / 100)}/h reales</>}</>}</span>
-                          <div className="row-actions">
-                            {usesPayments && <button className="text-button" onClick={() => setOpenPayments((o) => ({ ...o, [p.id]: !o[p.id] }))}>Cobros ({pt.payments.length})</button>}
-                            <button className="icon-button" onClick={() => editProject(p)} aria-label={`Editar ${p.name}`} title="Editar"><Pencil /></button>
-                            <button className="icon-button danger" onClick={() => deleteProject(p)} aria-label={`Borrar ${p.name}`} title="Borrar"><Trash2 /></button>
-                          </div>
-                        </div>
-                        {billing === 'fijo' && (
-                          <div className="project-progress">
-                            {price > 0 && <div className="thin-track"><div style={{ width: `${Math.min(100, (pt.paid / price) * 100)}%` }} /></div>}
-                            <small>{price > 0 ? <>Cobrado <b>US$ {fmtShort(pt.paid)}</b> de {fmtShort(price)}{price - pt.paid > 0 ? <> · falta cobrar <b>US$ {fmtShort(price - pt.paid)}</b></> : ' · cobrado completo'}</> : <>Cobrado US$ {fmtShort(pt.paid)} · poné el presupuesto total editando el proyecto</>}</small>
-                            <button className="text-button" onClick={() => newPayment(p)}><Plus /> Registrar cobro</button>
-                          </div>
-                        )}
-                        {usesPayments && openPayments[p.id] && (
-                          <div className="payments">
-                            {pt.payments.length === 0 && <p className="muted-line">Todavía no registraste cobros.</p>}
-                            {[...pt.payments].sort((a, b) => a.date.localeCompare(b.date)).map((x) => (
-                              <div className="payment-row" key={x.id}>
-                                {x.paid ? <Check className="paid-icon" /> : <button className="pay-check" onClick={() => setPayments((cur) => cur.map((y) => (y.id === x.id ? { ...y, paid: true, date: dateKey() } : y)))} aria-label="Marcar como cobrado" title="Pendiente: tocá cuando lo cobres" />}
-                                <span className="payment-label">{x.label}</span>
-                                <span className="payment-date">{x.paid ? x.date.split('-').reverse().join('/') : 'pendiente'}</span>
-                                <strong>US$ {fmtMoney(x.amount)}</strong>
-                                <button className="icon-button danger" onClick={() => window.confirm(`¿Borrar “${x.label}”?`) && setPayments((cur) => cur.filter((y) => y.id !== x.id))} aria-label="Borrar cobro"><X /></button>
-                              </div>
-                            ))}
-                            {billing === 'entrega' && <div className="payment-actions"><button className="text-button" onClick={() => newPayment(p)}><Plus /> Registrar cobro</button></div>}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
+                  {items.length === 0 && hidden === 0 && <p className="muted-line">Sin proyectos. Tocá <FolderPlus className="inline-icon" /> para agregar uno.</p>}
+                  {items.map((p) => renderProject(p))}
+                  {hidden > 0 && <button className="text-button hidden-projects" onClick={() => setProjectStatus('')}>+ {hidden} proyecto{hidden === 1 ? '' : 's'} más (pausados o terminados)</button>}
                 </div>
               )}
             </div>
@@ -312,6 +379,70 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
         {q && groups.every((g) => g.items.length === 0 && !g.client) && <p className="empty-list">No hay clientes ni proyectos con “{query}”.</p>}
         {clients.length === 0 && projects.length === 0 && <p className="empty-list">Todavía no cargaste clientes. Tocá “Nuevo cliente”.</p>}
       </div>
+      )}
+
+      {sheet && (() => {
+        const tot = clientTotals(sheet)
+        const status = sheet.status ?? 'activo'
+        const month = dateKey().slice(0, 7)
+        const monthSecs = tot.tasks.filter((t) => t.date.startsWith(month)).reduce((s, t) => s + t.seconds, 0)
+        const recentTasks = [...tot.tasks].sort((a, b) => (b.date + (b.start ?? '')).localeCompare(a.date + (a.start ?? '')) || b.id - a.id)
+        const last = recentTasks[0]?.date
+        const first = [...tot.tasks].sort((a, b) => a.date.localeCompare(b.date))[0]?.date
+        return (
+          <div className="modal-backdrop" onClick={() => setSheetId(null)}>
+            <div className="modal-card wide client-sheet" onClick={(e) => e.stopPropagation()}>
+              <button className="modal-close" onClick={() => setSheetId(null)} aria-label="Cerrar"><X /></button>
+              <div className="sheet-head">
+                <i className="client-avatar big" style={{ color: sheet.color }}>{sheet.name.slice(0, 1).toUpperCase()}</i>
+                <div><h2>{sheet.name}</h2><span className={`status-pill status-${status}`}>{STATUSES.find((s) => s.id === status)!.label}</span></div>
+              </div>
+
+              <dl className="sheet-data">
+                <div><dt>Contacto</dt><dd>{sheet.contact || <span className="muted">—</span>}</dd></div>
+                <div><dt>Email</dt><dd>{sheet.email ? <a href={`mailto:${sheet.email}`}><Mail className="inline-icon" /> {sheet.email}</a> : <span className="muted">—</span>}</dd></div>
+                <div><dt>Cliente desde</dt><dd>{sheet.since ? fmtDate(sheet.since) : first ? fmtDate(first) : <span className="muted">—</span>}</dd></div>
+                <div><dt>Último trabajo</dt><dd>{last ? fmtDate(last) : <span className="muted">Nunca</span>}</dd></div>
+              </dl>
+
+              <div className="sheet-stats">
+                <div><span>Horas totales</span><strong>{fmtHours(tot.seconds)}</strong></div>
+                <div><span>Este mes</span><strong>{fmtHours(monthSecs)}</strong></div>
+                <div><span>Ganado</span><strong>US$ {fmtShort(Math.round(tot.amount * 100) / 100)}</strong></div>
+                <div><span>Por cobrar</span><strong>US$ {fmtShort(Math.round(tot.pending * 100) / 100)}</strong></div>
+              </div>
+
+              {(sheet.links?.length || sheet.notes) ? <div className="sheet-section">
+                {sheet.links?.length ? <div className="sheet-links">{sheet.links.map((l, i) => <a key={i} className="link-chip" href={l.url} target="_blank" rel="noreferrer noopener"><ExternalLink /> {l.label}</a>)}</div> : null}
+                {sheet.notes && <p className="client-notes">{sheet.notes}</p>}
+              </div> : null}
+
+              <div className="sheet-section">
+                <h4>Proyectos <small>{tot.projects.length}</small></h4>
+                {tot.projects.length === 0 && <p className="muted-line">Sin proyectos.</p>}
+                {tot.projects.map((p) => {
+                  const pt = projectTotals(p)
+                  const st = statusOf(p)
+                  return <div className="sheet-row" key={p.id}><i className="dot" style={{ background: p.color }} /><span>{p.name}</span>{st !== 'activo' && <span className={`status-pill status-${st}`}>{PROJECT_STATUSES.find((x) => x.id === st)!.label}</span>}<small>{fmtHours(pt.seconds)} · US$ {fmtShort(Math.round(pt.amount * 100) / 100)}</small><button className="icon-button" onClick={() => editProject(p)} aria-label={`Editar ${p.name}`} title="Editar proyecto"><Pencil /></button></div>
+                })}
+              </div>
+
+              <div className="sheet-section">
+                <h4>Últimas tareas <small>{tot.tasks.length}</small></h4>
+                {recentTasks.length === 0 && <p className="muted-line">Todavía no registraste tareas para este cliente.</p>}
+                {recentTasks.slice(0, 8).map((t) => <div className="sheet-row task" key={t.id}><span>{t.name}{t.note && <em><StickyNote className="inline-icon" /> {t.note}</em>}</span><small>{fmtDate(t.date)} · {fmtHours(t.seconds)}</small></div>)}
+              </div>
+
+              <div className="modal-actions">
+                <button className="ghost-button danger-text" onClick={() => deleteClient(sheet)}><Trash2 /> Borrar</button>
+                <ExportMenu tasks={tot.tasks} title={`Trabajo para ${sheet.name}`} label="Exportar trabajo" />
+                <button className="ghost-button" onClick={() => newProject(sheet.id, sheet.color)}><FolderPlus /> Proyecto</button>
+                <button className="primary-button" onClick={() => editClient(sheet)}><Pencil /> Editar</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {clientDraft && (
         <div className="modal-backdrop" onClick={() => setClientDraft(null)}>
@@ -321,6 +452,11 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
             <div className="form-grid">
               <label>Nombre<input autoFocus value={clientDraft.name} onChange={(e) => setClientDraft({ ...clientDraft, name: e.target.value })} placeholder="Ej. Outlier" /></label>
               <div className="field"><span>Estado</span><div className="segmented small">{STATUSES.map((s) => <button type="button" key={s.id} className={clientDraft.status === s.id ? 'seg-on' : ''} onClick={() => setClientDraft({ ...clientDraft, status: s.id })}>{s.label}</button>)}</div></div>
+              <div className="modal-fields two">
+                <label>Contacto<input value={clientDraft.contact} onChange={(e) => setClientDraft({ ...clientDraft, contact: e.target.value })} placeholder="Nombre de la persona" /></label>
+                <label>Email<input type="email" value={clientDraft.email} onChange={(e) => setClientDraft({ ...clientDraft, email: e.target.value })} placeholder="hola@cliente.com" /></label>
+              </div>
+              <label>Cliente desde<input type="date" value={clientDraft.since} onChange={(e) => setClientDraft({ ...clientDraft, since: e.target.value })} /></label>
               <div className="field"><span>Links</span>
                 {clientDraft.links.map((l, i) => (
                   <div className="link-edit" key={i}>
@@ -347,6 +483,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
             <h2>{projectDraft.id ? 'Editar proyecto' : 'Nuevo proyecto'}</h2>
             <div className="form-grid">
               <label>Nombre<input autoFocus value={projectDraft.name} onChange={(e) => setProjectDraft({ ...projectDraft, name: e.target.value })} placeholder="Ej. AI trainer" /></label>
+              <div className="field"><span>Estado</span><div className="segmented small">{PROJECT_STATUSES.map((x) => <button type="button" key={x.id} className={projectDraft.status === x.id ? 'seg-on' : ''} onClick={() => setProjectDraft({ ...projectDraft, status: x.id })}>{x.label}</button>)}</div><small className="field-help">Los terminados no aparecen al elegir proyecto en el timer.</small></div>
               <label>Cliente<select value={projectDraft.clientId} onChange={(e) => setProjectDraft({ ...projectDraft, clientId: e.target.value, billing: e.target.value ? (projectDraft.billing === 'interno' ? 'hora' : projectDraft.billing) : 'interno' })}><option value="">{PERSONAL}</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
               {!projectDraft.clientId ? <small className="field-help">Proyecto personal: registrás el tiempo que le dedicás (marketing, LinkedIn, CV, tu web), sin tarifa ni cobros.</small> : <>
               <div className="field"><span>Cómo se cobra</span>

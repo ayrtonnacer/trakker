@@ -39,6 +39,8 @@ export function ProjectPicker({ projects, clients, value, onChange, onCreateProj
 
   const q = query.trim().toLowerCase()
   const matches = (p: Project) => {
+    // Los proyectos terminados no se ofrecen (salvo el que ya está elegido).
+    if (p.status === 'terminado' && p.id !== value) return false
     const client = clients.find((c) => c.id === p.clientId)
     return !q || p.name.toLowerCase().includes(q) || (client?.name.toLowerCase().includes(q) ?? false)
   }
@@ -59,8 +61,9 @@ export function ProjectPicker({ projects, clients, value, onChange, onCreateProj
       id: uid(),
       name: draft.name.trim(),
       clientId: draft.clientId || null,
-      rate: parseAmount(draft.rate),
-      billing: 'hora',
+      // Sin cliente es personal: suma tiempo, nunca plata.
+      rate: draft.clientId ? parseAmount(draft.rate) : 0,
+      billing: draft.clientId ? 'hora' : 'interno',
       color: PALETTE[projects.length % PALETTE.length],
     }
     onCreateProject(project)
@@ -101,13 +104,13 @@ export function ProjectPicker({ projects, clients, value, onChange, onCreateProj
             </>
           ) : (
             <div className="picker-form">
-              <p className="picker-group">Nuevo proyecto por hora</p>
+              <p className="picker-group">{draft.clientId ? 'Nuevo proyecto por hora' : 'Nuevo proyecto personal'}</p>
               <input autoFocus placeholder="Nombre del proyecto" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && create()} />
               <select value={draft.clientId} onChange={(e) => setDraft({ ...draft, clientId: e.target.value })} aria-label="Cliente">
                 <option value="">{NO_CLIENT}</option>
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <label className="rate-input"><span>Tarifa</span><input inputMode="decimal" placeholder="0" value={draft.rate} onChange={(e) => setDraft({ ...draft, rate: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && create()} /><span>USD/h</span></label>
+              {draft.clientId && <label className="rate-input"><span>Tarifa</span><input inputMode="decimal" placeholder="0" value={draft.rate} onChange={(e) => setDraft({ ...draft, rate: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && create()} /><span>USD/h</span></label>}
               <div className="picker-form-actions"><button type="button" className="ghost-button" onClick={() => setCreating(false)}>Cancelar</button><button type="button" className="primary-button" onClick={create} disabled={!draft.name.trim()}>Crear</button></div>
             </div>
           )}

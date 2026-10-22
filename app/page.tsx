@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, DollarSign, ExternalLink, Flame, History, Home, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Square, Tag, Users, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, DollarSign, ExternalLink, Flame, History, Home, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Repeat, Square, StickyNote, Tag, Users, X } from 'lucide-react'
 import {
   buildTask,
+  canBill,
   dateKey,
+  defaultBillable,
   describeProject,
   fmtClock,
   fmtHours,
@@ -25,6 +27,7 @@ import {
   type Payment,
   type PlanItem,
   type Project,
+  type Routine,
   type Task,
 } from '@/lib/game'
 import { ClientsView } from '@/components/tracker/clients-view'
@@ -49,14 +52,14 @@ const TABS: { id: string; icon: typeof Home }[] = [
 
 type Active = { base: number; startedAt: number | null; startTime?: string; target?: number } // target: segundos de la cuenta regresiva
 type Mode = { down: boolean; minutes: number }
-type Draft = { name: string; projectId: string | null; billable: boolean; tags: string; planId?: string } // planId: viene del backlog
+type Draft = { name: string; projectId: string | null; billable: boolean; tags: string; note: string; planId?: string; routineId?: string } // planId: viene del backlog; routineId: de una rutina
 type Toast = { id: number; title: string; text: string }
-type Manual = { id?: number; rate?: number; name: string; projectId: string | null; billable: boolean; tags: string; date: string; from: string; to: string }
+type Manual = { id?: number; rate?: number; routineId?: string; name: string; projectId: string | null; billable: boolean; tags: string; note: string; date: string; from: string; to: string }
 type Piece = { id: number; x: number; y: number; r: number; d: number; s: number; round: boolean }
 
 const DEFAULT_MODE: Mode = { down: false, minutes: 30 }
 const PRESET_MINUTES = [15, 25, 30, 45, 60]
-const EMPTY_DRAFT: Draft = { name: '', projectId: null, billable: false, tags: '' }
+const EMPTY_DRAFT: Draft = { name: '', projectId: null, billable: false, tags: '', note: '' }
 
 function seedData(today: string) {
   const clients: Client[] = [
@@ -101,6 +104,7 @@ export default function Page() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [goal, setGoal] = useState<Goal | null>(null)
   const [plan, setPlan] = useState<PlanItem[]>([])
+  const [routines, setRoutines] = useState<Routine[]>([])
   const [mode, setMode] = useState<Mode>(DEFAULT_MODE)
   const [loaded, setLoaded] = useState(false)
   const [today, setToday] = useState('')
@@ -110,12 +114,13 @@ export default function Page() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [syncOpen, setSyncOpen] = useState(false)
   const [suggestOpen, setSuggestOpen] = useState(false)
+  const [noteOpen, setNoteOpen] = useState(false)
   const timers = useRef<number[]>([])
 
   const running = active.startedAt !== null
 
   // Los datos que se guardan como .md en GitHub (el timer en curso queda sólo en este navegador).
-  const data = useMemo(() => ({ tasks, clients, projects, payments, goal, plan }), [tasks, clients, projects, payments, goal, plan])
+  const data = useMemo(() => ({ tasks, clients, projects, payments, goal, plan, routines }), [tasks, clients, projects, payments, goal, plan, routines])
   const sync = useGitSync({
     loaded,
     data,
@@ -126,6 +131,7 @@ export default function Page() {
       setPayments(d.payments)
       setGoal(d.goal)
       setPlan(d.plan)
+      setRoutines(d.routines ?? [])
     },
   })
 
@@ -145,6 +151,7 @@ export default function Page() {
         setPayments(saved.payments ?? [])
         setGoal(saved.goal ?? null)
         setPlan(saved.plan ?? [])
+        setRoutines(saved.routines ?? [])
         if (saved.active) setActive(saved.active)
         if (saved.draft) setDraft({ ...EMPTY_DRAFT, ...saved.draft })
         if (saved.mode) setMode({ ...DEFAULT_MODE, ...saved.mode })
@@ -170,11 +177,11 @@ export default function Page() {
   useEffect(() => {
     if (!loaded) return
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, payments, goal, plan, active, draft, mode }))
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, payments, goal, plan, routines, active, draft, mode }))
     } catch {
       // Sin almacenamiento (modo privado): la app sigue andando, sólo no recuerda.
     }
-  }, [loaded, tasks, clients, projects, payments, goal, plan, active, draft, mode])
+  }, [loaded, tasks, clients, projects, payments, goal, plan, routines, active, draft, mode])
 
   // El tiempo se calcula desde el inicio, así que sobrevive a pestañas en segundo plano.
   useEffect(() => {
@@ -188,7 +195,8 @@ export default function Page() {
   const elapsed = active.target ? Math.min(rawElapsed, active.target) : rawElapsed
   const shown = active.target ? active.target - elapsed : mode.down && !running ? mode.minutes * 60 : elapsed
   const info = describeProject(draft.projectId, projects, clients)
-  const liveGold = draft.billable && info.rate > 0 ? goldFor(elapsed, info.rate) : 0
+  const draftCanBill = canBill(draft.projectId, projects)
+  const liveGold = draft.billable && draftCanBill && info.rate > 0 ? goldFor(elapsed, info.rate) : 0
 
   useEffect(() => {
     document.title = running ? `${fmtClock(shown)} · ${draft.name || 'Tasker'}` : 'Tasker'
@@ -256,9 +264,8 @@ export default function Page() {
   }
 
   function pickProject(projectId: string | null) {
-    const p = describeProject(projectId, projects, clients)
-    // Un proyecto con tarifa por hora arranca como facturable; se puede cambiar con el botón $.
-    setDraft((d) => ({ ...d, projectId, billable: p.rate > 0 }))
+    // Un proyecto de un cliente arranca como facturable (se puede cambiar con el $); uno personal, nunca.
+    setDraft((d) => ({ ...d, projectId, billable: defaultBillable(projectId, projects, clients) }))
   }
 
   function addTag(tag: string) {
@@ -284,13 +291,16 @@ export default function Page() {
     const text = draft.name.trim()
     if (!text) return
     if (!draft.planId) setPlan((cur) => [...cur, { id: uid(), date: '', text, projectId: draft.projectId, hours: 0, done: false }])
-    setDraft((d) => ({ ...d, name: '', tags: '', planId: undefined }))
+    setDraft((d) => ({ ...d, name: '', tags: '', note: '', planId: undefined, routineId: undefined }))
+    setNoteOpen(false)
     toast('Guardada en el backlog', text)
   }
 
   function pickSuggestion(next: Draft) {
-    setDraft(next)
+    // Si ya escribiste una nota, se conserva.
+    setDraft((d) => ({ ...next, note: d.note }))
     setSuggestOpen(false)
+    setNoteOpen(false)
   }
 
   function removePlan(id: string) {
@@ -300,24 +310,27 @@ export default function Page() {
   function discardTask() {
     if (elapsed > 0 && !window.confirm('¿Descartar la tarea en curso sin registrar el tiempo?')) return
     setActive({ base: 0, startedAt: null })
-    setDraft((d) => ({ ...d, name: '', planId: undefined }))
+    setDraft((d) => ({ ...d, name: '', note: '', planId: undefined, routineId: undefined }))
+    setNoteOpen(false)
   }
 
   function stopTask() {
     if (elapsed < 1) return discardTask()
     record(buildTask({
       name: draft.name, seconds: elapsed, projectId: draft.projectId, billable: draft.billable,
-      tags: parseTags(draft.tags), date: dateKey(), start: active.startTime, projects, clients,
+      tags: parseTags(draft.tags), date: dateKey(), start: active.startTime, note: draft.note, routineId: draft.routineId, projects, clients,
     }))
     // Si venía del backlog, ya está hecha: sale de "por hacer".
     if (draft.planId) removePlan(draft.planId)
     setActive({ base: 0, startedAt: null })
-    setDraft((d) => ({ ...d, name: '', tags: '', planId: undefined }))
+    setDraft((d) => ({ ...d, name: '', tags: '', note: '', planId: undefined, routineId: undefined }))
+    setNoteOpen(false)
   }
 
   function startWith(next: Draft) {
     if (elapsed > 0 && !window.confirm('Hay una tarea en curso. ¿Descartarla y empezar esta?')) return
     setDraft(next)
+    setNoteOpen(false)
     const t = Date.now()
     setNow(t)
     setActive({ base: 0, startedAt: t, startTime: timeKey(), target: mode.down ? Math.max(1, mode.minutes) * 60 : undefined })
@@ -327,18 +340,37 @@ export default function Page() {
 
   function repeatTask(task: Task) {
     const projectId = projects.some((p) => p.id === task.projectId) ? task.projectId : null
-    startWith({ name: task.name, projectId, billable: task.billable, tags: task.tags.join(', ') })
+    startWith(taskDraft(task))
   }
 
   function startPlanItem(item: PlanItem) {
-    const projectId = projects.some((p) => p.id === item.projectId) ? item.projectId : null
-    startWith({ name: item.text, projectId, billable: describeProject(projectId, projects, clients).rate > 0, tags: '', planId: item.id })
+    startWith(planDraft(item))
+  }
+
+  function startRoutine(r: Routine) {
+    startWith(routineDraft(r))
+  }
+
+  // Borradores para la caja del timer, a partir de una tarea hecha, del backlog o de una rutina.
+  const known = (id: string | null) => (projects.some((p) => p.id === id) ? id : null)
+  function taskDraft(task: Task): Draft {
+    const projectId = known(task.projectId)
+    return { name: task.name, projectId, billable: task.billable && canBill(projectId, projects), tags: task.tags.join(', '), note: '', routineId: task.routineId }
+  }
+  function planDraft(item: PlanItem): Draft {
+    const projectId = known(item.projectId)
+    return { name: item.text, projectId, billable: defaultBillable(projectId, projects, clients), tags: '', note: '', planId: item.id }
+  }
+  function routineDraft(r: Routine): Draft {
+    const projectId = known(r.projectId)
+    return { name: r.text, projectId, billable: defaultBillable(projectId, projects, clients), tags: r.tags.join(', '), note: '', routineId: r.id }
   }
 
   function setBillable(ids: number[], billable: boolean) {
     const set = new Set(ids)
     setTasks((cur) => cur.map((t) => {
-      if (!set.has(t.id)) return t
+      // Las tareas de proyectos personales no se facturan nunca.
+      if (!set.has(t.id) || (billable && !canBill(t.projectId, projects))) return t
       const amount = billable && t.rate > 0 ? goldFor(t.seconds, t.rate) : 0
       return { ...t, billable, amount }
     }))
@@ -361,13 +393,13 @@ export default function Page() {
   function openManual() {
     const d = new Date()
     const from = new Date(d.getTime() - 3600000)
-    setManual({ name: '', projectId: draft.projectId, billable: draft.billable, tags: '', date: dateKey(), from: timeKey(from), to: timeKey(d) })
+    setManual({ name: '', projectId: draft.projectId, billable: draft.billable, tags: '', note: '', date: dateKey(), from: timeKey(from), to: timeKey(d) })
     setManualError('')
   }
 
   function editTask(task: Task) {
     const from = task.start ?? '09:00'
-    setManual({ id: task.id, rate: task.rate, name: task.name, projectId: task.projectId, billable: task.billable, tags: task.tags.join(', '), date: task.date, from, to: addMinutes(from, Math.round(task.seconds / 60)) })
+    setManual({ id: task.id, rate: task.rate, routineId: task.routineId, name: task.name, projectId: task.projectId, billable: task.billable, tags: task.tags.join(', '), note: task.note ?? '', date: task.date, from, to: addMinutes(from, Math.round(task.seconds / 60)) })
     setManualError('')
   }
 
@@ -386,7 +418,7 @@ export default function Page() {
     const keepRate = old && old.projectId === manual.projectId ? old.rate : undefined
     const task = buildTask({
       id: manual.id, name: manual.name, seconds: minutes * 60, projectId: manual.projectId, billable: manual.billable,
-      tags: parseTags(manual.tags), date: manual.date || dateKey(), start: manual.from, rate: keepRate, projects, clients,
+      tags: parseTags(manual.tags), date: manual.date || dateKey(), start: manual.from, rate: keepRate, note: manual.note, routineId: manual.routineId, projects, clients,
     })
     if (old) setTasks((cur) => cur.map((t) => (t.id === old.id ? task : t)))
     else record(task)
@@ -403,8 +435,13 @@ export default function Page() {
   // Sugerencias de la caja del timer: lo que está por hacer y tareas ya hechas para repetir, como plantilla.
   const typed = draft.name.trim().toLowerCase()
   const backlogMatches = backlog.filter((i) => !typed || i.text.toLowerCase().includes(typed)).slice(0, 6)
+  // Rutinas de hoy que todavía no se hicieron.
+  const weekday = today ? new Date(`${today}T12:00:00`).getDay() : -1
+  const doneRoutines = new Set(tasks.filter((t) => t.date === today && t.routineId).map((t) => t.routineId))
+  const routinesToday = routines.filter((r) => r.days.includes(weekday) && !doneRoutines.has(r.id))
+  const routineMatches = routinesToday.filter((r) => !typed || r.text.toLowerCase().includes(typed))
   const templates = (() => {
-    const seen = new Set(backlog.map((i) => i.text.toLowerCase()))
+    const seen = new Set([...backlog.map((i) => i.text.toLowerCase()), ...routinesToday.map((r) => r.text.toLowerCase())])
     const out: Task[] = []
     for (const t of [...tasks].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)) {
       const key = t.name.toLowerCase()
@@ -447,33 +484,30 @@ export default function Page() {
 
           <section className={`timer-bar ${running ? 'is-running' : ''}`}>
             <div className="timer-name-wrap">
-              <input className="timer-name" value={draft.name} onChange={(e) => { setDraft({ ...draft, name: e.target.value, planId: undefined }); setSuggestOpen(true) }} onFocus={() => setSuggestOpen(true)} onBlur={() => setSuggestOpen(false)} onKeyDown={(e) => { if (e.key === 'Escape') setSuggestOpen(false); if (e.key === 'Enter') { setSuggestOpen(false); if (running) stopTask(); else startTask() } }} maxLength={140} placeholder={backlog.length ? `¿En qué estás trabajando? · ${backlog.length} por hacer` : '¿En qué estás trabajando?'} aria-label="Nombre de tarea" autoComplete="off" />
-              {suggestOpen && !running && (backlogMatches.length > 0 || templates.length > 0) && (
+              <input className="timer-name" value={draft.name} onChange={(e) => { setDraft({ ...draft, name: e.target.value, planId: undefined, routineId: undefined }); setSuggestOpen(true) }} onFocus={() => setSuggestOpen(true)} onBlur={() => setSuggestOpen(false)} onKeyDown={(e) => { if (e.key === 'Escape') setSuggestOpen(false); if (e.key === 'Enter') { setSuggestOpen(false); if (running) stopTask(); else startTask() } }} maxLength={140} placeholder={['¿En qué estás trabajando?', backlog.length ? `${backlog.length} por hacer` : '', routinesToday.length ? `${routinesToday.length} rutina${routinesToday.length === 1 ? '' : 's'} hoy` : ''].filter(Boolean).join(' · ')} aria-label="Nombre de tarea" autoComplete="off" />
+              {suggestOpen && !running && (routineMatches.length > 0 || backlogMatches.length > 0 || templates.length > 0) && (
+                // Elegir una sugerencia sólo la carga en la caja: después se arranca con ▶.
                 <div className="suggest-menu" onMouseDown={(e) => e.preventDefault()}>
+                  {routineMatches.length > 0 && <div className="suggest-title"><Repeat /> Rutinas de hoy</div>}
+                  {routineMatches.map((r) => {
+                    const p = projects.find((x) => x.id === r.projectId)
+                    return <button className={`suggest-item ${draft.routineId === r.id ? 'suggest-on' : ''}`} key={r.id} onClick={() => pickSuggestion(routineDraft(r))}><span>{r.text}</span>{p && <small><i className="dot" style={{ background: p.color }} /> {p.name}</small>}</button>
+                  })}
                   {backlogMatches.length > 0 && <div className="suggest-title"><ListTodo /> Por hacer</div>}
                   {backlogMatches.map((i) => {
                     const p = projects.find((x) => x.id === i.projectId)
-                    return (
-                      <div className="suggest-row" key={i.id}>
-                        <button className="suggest-item" onClick={() => pickSuggestion({ name: i.text, projectId: p ? p.id : null, billable: describeProject(p ? p.id : null, projects, clients).rate > 0, tags: '', planId: i.id })}><span>{i.text}</span>{p && <small><i className="dot" style={{ background: p.color }} /> {p.name}</small>}</button>
-                        <button className="icon-button" onClick={() => { setSuggestOpen(false); startPlanItem(i) }} aria-label={`Empezar “${i.text}”`} title="Empezar ya"><Play /></button>
-                      </div>
-                    )
+                    return <button className={`suggest-item ${draft.planId === i.id ? 'suggest-on' : ''}`} key={i.id} onClick={() => pickSuggestion(planDraft(i))}><span>{i.text}</span>{p && <small><i className="dot" style={{ background: p.color }} /> {p.name}</small>}</button>
                   })}
                   {templates.length > 0 && <div className="suggest-title"><History /> Repetir</div>}
-                  {templates.map((t) => (
-                    <div className="suggest-row" key={t.id}>
-                      <button className="suggest-item" onClick={() => pickSuggestion({ name: t.name, projectId: projects.some((p) => p.id === t.projectId) ? t.projectId : null, billable: t.billable, tags: t.tags.join(', ') })}><span>{t.name}</span><small><i className="dot" style={{ background: t.color }} /> {t.project}</small></button>
-                      <button className="icon-button" onClick={() => { setSuggestOpen(false); repeatTask(t) }} aria-label={`Empezar “${t.name}”`} title="Empezar ya"><Play /></button>
-                    </div>
-                  ))}
+                  {templates.map((t) => <button className="suggest-item" key={t.id} onClick={() => pickSuggestion(taskDraft(t))}><span>{t.name}</span><small><i className="dot" style={{ background: t.color }} /> {t.project}</small></button>)}
                 </div>
               )}
             </div>
             <div className="timer-controls">
               <ProjectPicker projects={projects} clients={clients} value={draft.projectId} onChange={pickProject} onCreateProject={(p) => setProjects((cur) => [...cur, p])} compact />
               <label className="tags-input"><Tag /><input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} placeholder="Etiquetas" aria-label="Etiquetas" /></label>
-              <button className={`billable-toggle ${draft.billable ? 'billable-on' : ''}`} onClick={() => setDraft({ ...draft, billable: !draft.billable })} aria-pressed={draft.billable} title={draft.billable ? (info.rate > 0 ? `Facturable a ${info.rate} USD/h` : 'Facturable, pero sin tarifa por hora') : 'No facturable'} aria-label="Facturable"><DollarSign /></button>
+              <button className={`billable-toggle ${noteOpen || draft.note.trim() ? 'billable-on' : ''}`} onClick={() => setNoteOpen((o) => !o)} aria-pressed={noteOpen} title={draft.note.trim() ? `Nota: ${draft.note}` : 'Agregar una nota: qué hiciste, para acordarte después'} aria-label="Nota"><StickyNote /></button>
+              {draftCanBill && <button className={`billable-toggle ${draft.billable ? 'billable-on' : ''}`} onClick={() => setDraft({ ...draft, billable: !draft.billable })} aria-pressed={draft.billable} title={draft.billable ? (info.rate > 0 ? `Facturable a ${info.rate} USD/h` : 'Facturable: horas trabajadas para el cliente') : 'No facturable'} aria-label="Facturable"><DollarSign /></button>}
               <button className={`billable-toggle ${mode.down ? 'billable-on' : ''}`} onClick={() => setMode((m) => ({ ...m, down: !m.down }))} disabled={running} aria-pressed={mode.down} title={mode.down ? 'Cuenta regresiva: tocá para contar hacia arriba' : 'Contando hacia arriba: tocá para usar cuenta regresiva'} aria-label="Modo del timer">{mode.down ? <ArrowDown /> : <ArrowUp />}</button>
               <span className="timer-clock" aria-live="off">{fmtClock(shown)}</span>
               {!running && draft.name.trim() && !draft.planId && <button className="icon-button" onClick={saveForLater} aria-label="Guardar en el backlog" title="Guardar en el backlog para hacerla después"><ListPlus /></button>}
@@ -481,6 +515,7 @@ export default function Page() {
               {elapsed > 0 && <button className="icon-button" onClick={discardTask} aria-label="Descartar" title="Descartar sin registrar"><X /></button>}
             </div>
           </section>
+          {(noteOpen || draft.note) && <textarea className="timer-note" autoFocus={noteOpen} rows={2} value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') setNoteOpen(false) }} maxLength={2000} placeholder="Nota de la tarea: qué hiciste, decisiones, links, lo que falta…" aria-label="Nota de la tarea" />}
           <div className="timer-sub">
             {!running && mode.down && <span className="countdown-presets">Cuenta regresiva: {PRESET_MINUTES.map((m) => <button key={m} className={mode.minutes === m ? 'preset-on' : ''} onClick={() => setMode({ down: true, minutes: m })}>{m} min</button>)}<input type="number" min={1} max={600} value={mode.minutes} onChange={(e) => setMode({ down: true, minutes: Math.min(600, Math.max(1, Math.round(Number(e.target.value)) || 1)) })} aria-label="Minutos" /> min</span>}
             {running && active.target && <span>Cuenta regresiva de {fmtHours(active.target)}: al llegar a cero se registra sola</span>}
@@ -538,12 +573,12 @@ export default function Page() {
 
           <section className="recent-section">
             <div className="panel-heading"><h3>Últimos registros</h3><button className="text-button" onClick={() => setActiveTab('Tareas')}>Ver todas →</button></div>
-            <div className="task-list">{recent.length === 0 && <p className="empty-list">Todavía no registraste nada. Escribí una tarea y tocá ▶.</p>}{recent.map((task) => <TaskRow key={task.id} task={task} dateLabel={dayLabel(task.date, today)} onDelete={deleteTask} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} />)}</div>
+            <div className="task-list">{recent.length === 0 && <p className="empty-list">Todavía no registraste nada. Escribí una tarea y tocá ▶.</p>}{recent.map((task) => <TaskRow key={task.id} task={task} dateLabel={dayLabel(task.date, today)} onDelete={deleteTask} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} billable={canBill(task.projectId, projects)} />)}</div>
             <button className="text-button add-manual" onClick={openManual}><Plus /> Cargar tiempo a mano</button>
           </section>
         </>}
 
-        {activeTab === 'Tareas' && <TasksView tasks={tasks} backlog={backlog} projects={projects} clients={clients} onStartPlan={startPlanItem} onRemovePlan={removePlan} today={today} onDelete={deleteTask} onDeleteMany={deleteMany} onSetBillable={setBillable} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} onAddManual={openManual} />}
+        {activeTab === 'Tareas' && <TasksView tasks={tasks} backlog={backlog} routines={routines} setRoutines={setRoutines} onStartRoutine={startRoutine} onCreateProject={(p) => setProjects((cur) => [...cur, p])} projects={projects} clients={clients} onStartPlan={startPlanItem} onRemovePlan={removePlan} today={today} onDelete={deleteTask} onDeleteMany={deleteMany} onSetBillable={setBillable} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} onAddManual={openManual} />}
         {activeTab === 'Estadísticas' && today && <StatsView tasks={tasks} payments={payments} projects={projects} clients={clients} goal={goal} setGoal={setGoal} today={today} />}
         {activeTab === 'Clientes' && <ClientsView clients={clients} projects={projects} tasks={tasks} payments={payments} setClients={setClients} setProjects={setProjects} setTasks={setTasks} setPayments={setPayments} />}
       </div>
@@ -556,10 +591,11 @@ export default function Page() {
         {!manual.id && <p>Sumá una tarea que ya hiciste para no perder ese trabajo.</p>}
         <div className="form-grid">
           <label>Tarea<input autoFocus placeholder="¿Qué hiciste?" value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} /></label>
-          <div className="field"><span>Proyecto</span><ProjectPicker projects={projects} clients={clients} value={manual.projectId} onChange={(id) => setManual({ ...manual, projectId: id, billable: describeProject(id, projects, clients).rate > 0 })} onCreateProject={(p) => setProjects((cur) => [...cur, p])} /></div>
+          <div className="field"><span>Proyecto</span><ProjectPicker projects={projects} clients={clients} value={manual.projectId} onChange={(id) => setManual({ ...manual, projectId: id, billable: defaultBillable(id, projects, clients) })} onCreateProject={(p) => setProjects((cur) => [...cur, p])} /></div>
           <label>Etiquetas<input placeholder="diseño, reunión" value={manual.tags} onChange={(e) => setManual({ ...manual, tags: e.target.value })} /></label>
           <div className="modal-fields three"><label>Fecha<input type="date" value={manual.date} onChange={(e) => setManual({ ...manual, date: e.target.value })} /></label><label>Desde<input type="time" value={manual.from} onChange={(e) => setManual({ ...manual, from: e.target.value })} /></label><label>Hasta<input type="time" value={manual.to} onChange={(e) => setManual({ ...manual, to: e.target.value })} /></label></div>
-          <label className="check-line"><input type="checkbox" checked={manual.billable} onChange={(e) => setManual({ ...manual, billable: e.target.checked })} /> Facturable{manual.billable && (manualRate > 0 ? ` · ${manualRate} USD/h` : ' · sin tarifa por hora')}</label>
+          <label>Nota<textarea rows={3} value={manual.note} onChange={(e) => setManual({ ...manual, note: e.target.value })} maxLength={2000} placeholder="Qué hiciste, decisiones, links, lo que quedó pendiente…" /></label>
+          {canBill(manual.projectId, projects) ? <label className="check-line"><input type="checkbox" checked={manual.billable} onChange={(e) => setManual({ ...manual, billable: e.target.checked })} /> Facturable{manual.billable && (manualRate > 0 ? ` · ${manualRate} USD/h` : ' · sin tarifa por hora')}</label> : <small className="field-help">Proyecto personal: suma tiempo, no se factura.</small>}
         </div>
         {manualError && <p className="form-error">{manualError}</p>}
         <div className="modal-actions">

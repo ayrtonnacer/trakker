@@ -2,7 +2,7 @@ export type Link = { label: string; url: string }
 
 export type ClientStatus = 'activo' | 'potencial' | 'pausado'
 
-export type Client = { id: string; name: string; color: string; links?: Link[]; notes?: string; status?: ClientStatus }
+export type Client = { id: string; name: string; color: string; links?: Link[]; notes?: string; status?: ClientStatus; contact?: string; email?: string; since?: string }
 
 /**
  * Cómo se cobra un proyecto:
@@ -13,8 +13,11 @@ export type Client = { id: string; name: string; color: string; links?: Link[]; 
  */
 export type Billing = 'hora' | 'fijo' | 'entrega' | 'interno'
 
+/** Activo = en curso; terminado = se esconde del selector y de la lista por defecto. */
+export type ProjectStatus = 'activo' | 'pausado' | 'terminado'
+
 /** Proyecto. clientId null = sin cliente. rate = USD/h (hora) o USD por entrega (entrega). price = total (fijo). */
-export type Project = { id: string; name: string; clientId: string | null; rate: number; color: string; billing?: Billing; price?: number }
+export type Project = { id: string; name: string; clientId: string | null; rate: number; color: string; billing?: Billing; price?: number; status?: ProjectStatus }
 
 /** Plata cobrada (o por cobrar) que no sale de las horas: adelantos, hitos, entregas. */
 export type Payment = { id: string; projectId: string | null; label: string; amount: number; date: string; paid: boolean }
@@ -35,6 +38,8 @@ export type Task = {
   date: string // AAAA-MM-DD, hora local
   start?: string // HH:MM
   long: boolean
+  note?: string // memo: qué se hizo, para acordarse, exportar o mostrarle al cliente
+  routineId?: string // si salió de una rutina, para saber que ya se hizo hoy
 }
 
 export type Action = { id: string; text: string; done: boolean }
@@ -44,6 +49,9 @@ export type Goal = { baseline: number; pct: number; months: number; start: strin
 
 /** date vacío = backlog: tarea pendiente sin día asignado. */
 export type PlanItem = { id: string; date: string; text: string; projectId: string | null; hours: number; done: boolean }
+
+/** Tarea que se repite ciertos días de la semana (0 = domingo … 6 = sábado). */
+export type Routine = { id: string; text: string; projectId: string | null; days: number[]; tags: string[] }
 
 export const CURRENCY = 'USD'
 export const NO_CLIENT = 'Sin cliente'
@@ -158,6 +166,18 @@ export function describeProject(projectId: string | null, projects: Project[], c
   }
 }
 
+/** Los proyectos personales nunca se facturan: no tiene sentido marcar el $. */
+export function canBill(projectId: string | null, projects: Project[]) {
+  const p = projects.find((x) => x.id === projectId)
+  return !p || billingOf(p) !== 'interno'
+}
+
+/** Si trabajás para un cliente, son horas que le dedicás: arranca como facturable. */
+export function defaultBillable(projectId: string | null, projects: Project[], clients: Client[]) {
+  const { project, client, billing } = describeProject(projectId, projects, clients)
+  return !!project && !!client && billing !== 'interno'
+}
+
 /** Arma una tarea cerrada. Si no factura por hora, suma tiempo con monto 0. */
 export function buildTask(input: {
   id?: number
@@ -169,12 +189,16 @@ export function buildTask(input: {
   date: string
   start?: string
   rate?: number // para respetar la tarifa congelada al editar
+  note?: string
+  routineId?: string
   projects: Project[]
   clients: Client[]
 }): Task {
   const info = describeProject(input.projectId, input.projects, input.clients)
   const rate = input.rate ?? info.rate
-  const amount = input.billable && rate > 0 ? goldFor(input.seconds, rate) : 0
+  const billable = input.billable && canBill(input.projectId, input.projects)
+  const amount = billable && rate > 0 ? goldFor(input.seconds, rate) : 0
+  const note = input.note?.trim()
   return {
     id: input.id ?? Date.now() + Math.floor(Math.random() * 1000),
     name: input.name.trim() || 'Tarea sin título',
@@ -182,7 +206,7 @@ export function buildTask(input: {
     project: info.projectName,
     projectId: info.project?.id ?? null,
     seconds: input.seconds,
-    billable: input.billable,
+    billable,
     rate,
     amount,
     currency: CURRENCY,
@@ -191,6 +215,8 @@ export function buildTask(input: {
     date: input.date,
     start: input.start,
     long: false,
+    ...(note ? { note } : {}),
+    ...(input.routineId ? { routineId: input.routineId } : {}),
   }
 }
 

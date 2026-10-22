@@ -2,9 +2,9 @@
 // Cada archivo tiene una tabla legible y, al final, un bloque <!-- trakker:data --> con
 // el dato exacto: ese bloque es la fuente de verdad al leer. Editar la tabla a mano no
 // cambia nada; para corregir algo, usá la app (o editá el bloque de datos).
-import { fmtClock, fmtMoney, type Client, type Goal, type Payment, type PlanItem, type Project, type Task } from './game'
+import { fmtClock, fmtMoney, type Client, type Goal, type Payment, type PlanItem, type Project, type Routine, type Task } from './game'
 
-export type AppData = { tasks: Task[]; clients: Client[]; projects: Project[]; payments: Payment[]; goal: Goal | null; plan: PlanItem[] }
+export type AppData = { tasks: Task[]; clients: Client[]; projects: Project[]; payments: Payment[]; goal: Goal | null; plan: PlanItem[]; routines: Routine[] }
 export type SyncConfig = { repo: string; branch: string; dir: string; token: string }
 export type Change = { path: string; content: string | null } // null = borrar
 
@@ -12,6 +12,7 @@ const API = 'https://api.github.com'
 const TASKS_DIR = 'tareas'
 const CLIENTS_FILE = 'clientes.md'
 const GOALS_FILE = 'metas.md'
+const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S']
 
 export class SyncError extends Error {
   status: number
@@ -48,14 +49,14 @@ function tasksFile(month: string, tasks: Task[]) {
   const sorted = [...tasks].sort(byDateStart)
   const seconds = sorted.reduce((s, t) => s + t.seconds, 0)
   const amount = sorted.reduce((s, t) => s + t.amount, 0)
-  const rows = sorted.map((t) => `| ${t.date} | ${t.start ?? ''} | ${cell(t.name)} | ${cell(t.project)} | ${cell(t.client)} | ${fmtClock(t.seconds)} | ${t.billable ? 'sí' : 'no'} | ${t.amount.toFixed(2)} | ${cell(t.tags.join(', '))} |`)
+  const rows = sorted.map((t) => `| ${t.date} | ${t.start ?? ''} | ${cell(t.name)} | ${cell(t.project)} | ${cell(t.client)} | ${fmtClock(t.seconds)} | ${t.billable ? 'sí' : 'no'} | ${t.amount.toFixed(2)} | ${cell(t.tags.join(', '))} | ${cell(t.note ?? '')} |`)
   return [
     `# Tareas ${month}`,
     '',
     `**${sorted.length} tareas · ${fmtClock(seconds)} · US$ ${fmtMoney(amount)}**`,
     '',
-    '| Fecha | Inicio | Tarea | Proyecto | Cliente | Duración | Facturable | US$ | Etiquetas |',
-    '|---|---|---|---|---|---|---|---:|---|',
+    '| Fecha | Inicio | Tarea | Proyecto | Cliente | Duración | Facturable | US$ | Etiquetas | Notas |',
+    '|---|---|---|---|---|---|---|---:|---|---|',
     ...rows,
     '',
     block(lines(sorted)),
@@ -97,7 +98,8 @@ function goalsFile(d: AppData) {
     if (g.actions.length) out.push('### Acciones', '', ...g.actions.map((a) => `- [${a.done ? 'x' : ' '}] ${a.text}`), '')
   } else out.push('Sin meta definida.', '')
   if (d.plan.length) out.push('## Por hacer', '', ...d.plan.map((p) => `- [${p.done ? 'x' : ' '}] ${p.text}`), '')
-  out.push(block(`{\n"goal": ${g ? json(g) : 'null'},\n"plan": ${lines(d.plan)}\n}`))
+  if (d.routines.length) out.push('## Rutinas', '', ...d.routines.map((r) => `- ${r.text} (${[1, 2, 3, 4, 5, 6, 0].filter((x) => r.days.includes(x)).map((x) => DAY_LETTERS[x]).join(' ')})`), '')
+  out.push(block(`{\n"goal": ${g ? json(g) : 'null'},\n"plan": ${lines(d.plan)},\n"routines": ${lines(d.routines)}\n}`))
   return out.join('\n')
 }
 
@@ -126,6 +128,7 @@ export function parseFiles(files: Record<string, string>) {
     found = true
     data.goal = goals.goal ?? null
     data.plan = goals.plan ?? []
+    data.routines = goals.routines ?? []
   }
   const taskFiles = Object.keys(files).filter((p) => p.startsWith(`${TASKS_DIR}/`))
   if (taskFiles.length || clients || goals) {

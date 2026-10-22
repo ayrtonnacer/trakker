@@ -467,7 +467,7 @@ a { color: inherit; }
   .hero-number { font-size: 40px; }
   .summary-grid { grid-template-columns: 1fr 1fr; }
   .goal-card { grid-column: 1 / -1; }
-  .task-tags, .task-duration, .hide-mobile, .task-row .billable-toggle { display: none; }
+  .task-tags, .task-duration, .hide-mobile, .task-row .billable-toggle, .task-row .billable-spacer { display: none; }
   .task-row { gap: 10px; padding: 8px 10px; }
   .task-row .row-actions { opacity: 1; }
   .task-money { min-width: 64px; }
@@ -604,3 +604,73 @@ a { color: inherit; }
 .project-progress { align-items: flex-start; }
 .project-progress b { color: var(--strong); font-weight: 600; }
 .goal-panel { margin-top: 12px; }
+
+/* Caja del timer: nota de la tarea y sugerencias que sólo se eligen */
+.timer-note { display: block; width: 100%; margin-top: 8px; resize: vertical; border: 1px solid var(--line-strong); border-radius: 8px; padding: 9px 12px; color: var(--text); background: var(--surface); font: inherit; font-size: 13px; line-height: 1.5; }
+.suggest-menu > .suggest-item { width: 100%; border-radius: 6px; }
+.suggest-menu > .suggest-item:hover, .suggest-on { background: var(--hover); }
+.task-note { display: flex; align-items: center; gap: 4px; overflow: hidden; max-width: 100%; color: var(--faint); font-size: 12px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.task-note svg { width: 12px; height: 12px; flex: 0 0 auto; }
+.billable-spacer { flex: 0 0 auto; width: 30px; }
+
+/* Exportar */
+.export-wrap { position: relative; display: inline-flex; }
+.export-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 40; display: flex; flex-direction: column; width: 290px; border: 1px solid var(--line-strong); border-radius: 10px; padding: 6px; background: var(--surface); box-shadow: var(--shadow); white-space: normal; }
+.bulk-bar .export-pop { top: auto; bottom: calc(100% + 10px); }
+.bulk-bar .export-wrap .ghost-button { border: 0; padding: 6px 10px; background: none; }
+.export-pop > button { display: flex; align-items: flex-start; gap: 10px; border: 0; border-radius: 6px; padding: 8px; background: none; text-align: left; }
+.export-pop > button:hover { background: var(--hover); }
+.export-pop > button svg { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; color: var(--muted); }
+.export-pop span { display: flex; flex-direction: column; gap: 2px; }
+.export-pop b { color: var(--strong); font-size: 13px; font-weight: 550; }
+.export-pop small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+
+/* Rutinas */
+.routines-group { margin-bottom: 18px; }
+.routines-group .day-head strong { display: inline-flex; align-items: center; gap: 6px; }
+.routines-empty { padding: 0 12px; }
+.routine-state { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.routine-state svg { width: 13px; height: 13px; }
+.routine-done { color: var(--accent); }
+.day-picker { display: flex; gap: 6px; }
+.day-picker button { width: 34px; height: 34px; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--muted); background: var(--surface); font-size: 13px; font-weight: 600; }
+.day-picker .day-on { border-color: var(--accent); color: var(--on-accent); background: var(--accent); }
+.day-presets { display: flex; gap: 4px; margin-top: 4px; }
+
+/* Clientes: ficha, estados de proyecto y lista plana */
+.client-open { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; border: 0; border-radius: 6px; padding: 0; background: none; text-align: left; }
+.client-open:hover .client-title strong { text-decoration: underline; text-underline-offset: 3px; }
+.status-pill.status-terminado { color: var(--muted); background: var(--soft); }
+.project-done strong { color: var(--muted); }
+.project-row.flat { padding-left: 14px; }
+.project-list .project-progress { padding-left: 32px; }
+.project-client { color: var(--muted); font-size: 12px; }
+.hidden-projects { margin: 6px 0 8px 64px; }
+.modal-card.wide { width: min(640px, 100%); }
+.sheet-head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.sheet-head h2 { margin-bottom: 4px; }
+.client-avatar.big { width: 44px; height: 44px; border-radius: 10px; font-size: 20px; }
+.sheet-data { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0 0 16px; }
+.sheet-data dt { color: var(--muted); font-size: 12px; }
+.sheet-data dd { overflow: hidden; margin: 2px 0 0; color: var(--strong); font-size: 14px; text-overflow: ellipsis; }
+.sheet-data a { color: var(--text); }
+.sheet-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+.sheet-stats div { display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--soft); }
+.sheet-stats span { color: var(--muted); font-size: 11px; }
+.sheet-stats strong { color: var(--strong); font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.sheet-section { margin-bottom: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.sheet-section h4 { margin: 0 0 6px; color: var(--strong); font-size: 13px; font-weight: 600; }
+.sheet-section h4 small { margin-left: 4px; color: var(--faint); font-weight: 400; }
+.sheet-links { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.sheet-row { display: flex; align-items: center; gap: 8px; min-height: 34px; font-size: 13px; }
+.sheet-row > span { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.sheet-row.task > span { overflow: hidden; text-overflow: ellipsis; }
+.sheet-row em { overflow: hidden; color: var(--faint); font-size: 12px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-row small { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.client-sheet .modal-actions { flex-wrap: wrap; }
+.client-sheet .modal-actions .danger-text { margin-right: auto; }
+@media (max-width: 760px) {
+  .sheet-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .routine-state { display: none; }
+  .hidden-projects { margin-left: 14px; }
+}
