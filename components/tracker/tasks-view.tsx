@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useRef, useState } from 'react'
-import { Check, Pencil, Play, Plus, Repeat, Search, Trash2, X } from 'lucide-react'
+import { Check, Pencil, Play, Plus, Repeat, Search, StickyNote, Trash2, X } from 'lucide-react'
 import { PERSONAL, canBill, dateKey, fmtHours, fmtMoney, parseTags, uid, type Client, type PlanItem, type Project, type Routine, type Task } from '@/lib/game'
 import { ExportMenu } from './export-menu'
 import { ProjectPicker } from './project-picker'
@@ -15,6 +15,7 @@ const WEEKDAYS_ONLY = [1, 2, 3, 4, 5]
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]
 
 type RoutineDraft = { id?: string; text: string; projectId: string | null; days: number[]; tags: string }
+type PlanDraft = { item: PlanItem; text: string; projectId: string | null; note: string }
 
 function daysLabel(days: number[]) {
   if (days.length === 7) return 'Todos los días'
@@ -66,6 +67,7 @@ type Props = {
   clients: Client[]
   onStartPlan: (item: PlanItem) => void
   onRemovePlan: (id: string) => void
+  onUpdatePlan: (item: PlanItem) => void
   today: string
   onDelete: (id: number) => void
   onDeleteMany: (ids: number[]) => void
@@ -76,7 +78,7 @@ type Props = {
   onAddManual: () => void
 }
 
-export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutine, onCreateProject, projects, clients, onStartPlan, onRemovePlan, today, onDelete, onDeleteMany, onSetBillable, onRepeat, onEdit, onToggleBillable, onAddManual }: Props) {
+export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutine, onCreateProject, projects, clients, onStartPlan, onRemovePlan, onUpdatePlan, today, onDelete, onDeleteMany, onSetBillable, onRepeat, onEdit, onToggleBillable, onAddManual }: Props) {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [query, setQuery] = useState('')
   const [range, setRange] = useState<Range>('todo')
@@ -87,6 +89,8 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
   const lastClicked = useRef<number | null>(null)
   const [routineDraft, setRoutineDraft] = useState<RoutineDraft | null>(null)
   const [routineError, setRoutineError] = useState('')
+  const [planDraft, setPlanDraft] = useState<PlanDraft | null>(null)
+  const [planError, setPlanError] = useState('')
 
   const q = query.trim().toLowerCase()
   const [fromKey, toKey] = rangeKeys(range, today, from, to)
@@ -149,11 +153,30 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
     if (!routineDraft) return
     const text = routineDraft.text.trim()
     if (!text) return setRoutineError('Ponele un nombre a la rutina.')
+    if (!routineDraft.projectId) return setRoutineError('Elegí un proyecto: de un cliente o personal.')
     if (!routineDraft.days.length) return setRoutineError('Elegí al menos un día.')
     const data = { text, projectId: routineDraft.projectId, days: [...routineDraft.days].sort(), tags: parseTags(routineDraft.tags) }
     if (routineDraft.id) setRoutines((cur) => cur.map((x) => (x.id === routineDraft.id ? { ...x, ...data } : x)))
     else setRoutines((cur) => [...cur, { id: uid(), ...data }])
     setRoutineDraft(null)
+  }
+
+  /** Guarda los cambios de una tarea del backlog. Devuelve la tarea actualizada, o null si falta algo. */
+  function savePlan(): PlanItem | null {
+    if (!planDraft) return null
+    const text = planDraft.text.trim()
+    if (!text) { setPlanError('Ponele un nombre a la tarea.'); return null }
+    const note = planDraft.note.trim()
+    const { note: _old, ...rest } = planDraft.item
+    const item: PlanItem = { ...rest, text, projectId: planDraft.projectId, ...(note ? { note } : {}) }
+    onUpdatePlan(item)
+    setPlanDraft(null)
+    return item
+  }
+
+  function openPlan(i: PlanItem) {
+    setPlanDraft({ item: i, text: i.text, projectId: i.projectId, note: i.note ?? '' })
+    setPlanError('')
   }
 
   function removeRoutine(x: Routine) {
@@ -194,7 +217,7 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
                 <div className="task-row" key={x.id}>
                   <button className="task-info" onClick={() => { setRoutineDraft({ id: x.id, text: x.text, projectId: x.projectId, days: x.days, tags: x.tags.join(', ') }); setRoutineError('') }} title="Editar rutina">
                     <strong>{x.text}</strong>
-                    <span><i className="dot" style={{ background: p?.color ?? 'var(--faint)' }} /> {p?.name ?? 'Sin proyecto'} · {daysLabel(x.days)}</span>
+                    <span><i className="dot" style={{ background: p?.color ?? 'var(--faint)' }} /> {p?.name ?? 'Elegí un proyecto'} · {daysLabel(x.days)}</span>
                   </button>
                   <span className={`routine-state ${done ? 'routine-done' : ''}`}>{done ? <><Check /> Hecha hoy</> : todays ? 'Toca hoy' : 'Hoy no toca'}</span>
                   <div className="row-actions">
@@ -216,8 +239,13 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
               const p = projects.find((x) => x.id === i.projectId)
               return (
                 <div className="task-row" key={i.id}>
-                  <div className="task-info"><strong>{i.text}</strong><span><i className="dot" style={{ background: p?.color ?? 'var(--faint)' }} /> {p?.name ?? 'Sin proyecto'}</span></div>
+                  <button className="task-info" onClick={() => openPlan(i)} title="Editar">
+                    <strong>{i.text}</strong>
+                    <span><i className="dot" style={{ background: p?.color ?? 'var(--faint)' }} /> {p?.name ?? 'Elegí un proyecto'}</span>
+                    {i.note && <em className="task-note" title={i.note}><StickyNote /> {i.note}</em>}
+                  </button>
                   <div className="row-actions">
+                    <button className="icon-button hide-mobile" onClick={() => openPlan(i)} aria-label={`Editar “${i.text}”`} title="Editar"><Pencil /></button>
                     <button className="icon-button" onClick={() => onStartPlan(i)} aria-label={`Empezar “${i.text}”`} title="Empezar"><Play /></button>
                     <button className="icon-button danger" onClick={() => onRemovePlan(i.id)} aria-label={`Quitar “${i.text}”`} title="Quitar"><Trash2 /></button>
                   </div>
@@ -267,6 +295,27 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
           <ExportMenu tasks={selTasks} title={`${filterTitle} · selección`} />
           <button className="bulk-danger" onClick={removeSelected}><Trash2 /> Borrar</button>
           <button className="icon-button" onClick={() => setSelected(new Set())} aria-label="Quitar selección"><X /></button>
+        </div>
+      )}
+
+      {planDraft && (
+        <div className="modal-backdrop" onClick={() => setPlanDraft(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setPlanDraft(null)} aria-label="Cerrar"><X /></button>
+            <h2>Tarea por hacer</h2>
+            <div className="form-grid">
+              <label>Tarea<input autoFocus value={planDraft.text} onChange={(e) => setPlanDraft({ ...planDraft, text: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && savePlan()} maxLength={140} /></label>
+              <div className="field"><span>Proyecto</span><ProjectPicker projects={projects} clients={clients} value={planDraft.projectId} onChange={(id) => setPlanDraft({ ...planDraft, projectId: id })} onCreateProject={onCreateProject} /></div>
+              <label>Nota<textarea rows={3} value={planDraft.note} onChange={(e) => setPlanDraft({ ...planDraft, note: e.target.value })} maxLength={2000} placeholder="Qué hay que hacer, links, detalles…" /></label>
+            </div>
+            {planError && <p className="form-error">{planError}</p>}
+            <div className="modal-actions">
+              <button className="ghost-button danger-text" onClick={() => { onRemovePlan(planDraft.item.id); setPlanDraft(null) }}>Borrar</button>
+              <button className="ghost-button" onClick={() => setPlanDraft(null)}>Cancelar</button>
+              <button className="ghost-button" onClick={() => { const item = savePlan(); if (item) onStartPlan(item) }}><Play /> Empezar</button>
+              <button className="primary-button" onClick={() => savePlan()}><Check /> Guardar</button>
+            </div>
+          </div>
         </div>
       )}
 

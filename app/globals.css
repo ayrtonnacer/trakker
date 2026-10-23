@@ -674,3 +674,9 @@ a { color: inherit; }
   .routine-state { display: none; }
   .hidden-projects { margin-left: 14px; }
 }
+
+/* Buscador del selector de proyectos dentro de un formulario: lupa y caja en la misma línea */
+.form-grid .picker-search { flex-direction: row; gap: 7px; color: var(--muted); }
+.form-grid .picker-search input, .form-grid .picker-search input:focus { flex: 1; border: 0; border-radius: 0; padding: 7px 0; background: none; box-shadow: none; font-size: 13px; }
+/* Dentro de un formulario la lista se abre en el lugar, así la ventana no la corta. */
+.form-grid .picker-pop { position: static; width: 100%; margin-top: 6px; box-shadow: none; }

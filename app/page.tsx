@@ -46,8 +46,8 @@ const WEEKDAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes
 const TABS: { id: string; icon: typeof Home }[] = [
   { id: 'Inicio', icon: Home },
   { id: 'Tareas', icon: ListChecks },
-  { id: 'Estadísticas', icon: BarChart3 },
   { id: 'Clientes', icon: Users },
+  { id: 'Estadísticas', icon: BarChart3 },
 ]
 
 type Active = { base: number; startedAt: number | null; startTime?: string; target?: number } // target: segundos de la cuenta regresiva
@@ -115,6 +115,7 @@ export default function Page() {
   const [syncOpen, setSyncOpen] = useState(false)
   const [suggestOpen, setSuggestOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
+  const [pickerKey, setPickerKey] = useState(0)
   const timers = useRef<number[]>([])
 
   const running = active.startedAt !== null
@@ -272,7 +273,14 @@ export default function Page() {
     setDraft((d) => ({ ...d, tags: [...parseTags(d.tags), tag].join(', ') }))
   }
 
+  /** Toda tarea va a un proyecto (de un cliente o personal): si falta, se abre el selector. */
+  function askProject() {
+    toast('Elegí un proyecto', 'Cada tarea va a un cliente o a Personal.')
+    setPickerKey((k) => k + 1)
+  }
+
   function startTask() {
+    if (!draft.projectId) return askProject()
     const t = Date.now()
     setNow(t)
     setActive((a) => ({ ...a, startedAt: t, startTime: a.startTime ?? timeKey(), target: a.target ?? (mode.down ? Math.max(1, mode.minutes) * 60 : undefined) }))
@@ -290,7 +298,7 @@ export default function Page() {
   function saveForLater() {
     const text = draft.name.trim()
     if (!text) return
-    if (!draft.planId) setPlan((cur) => [...cur, { id: uid(), date: '', text, projectId: draft.projectId, hours: 0, done: false }])
+    if (!draft.planId) setPlan((cur) => [...cur, { id: uid(), date: '', text, projectId: draft.projectId, hours: 0, done: false, ...(draft.note.trim() ? { note: draft.note.trim() } : {}) }])
     setDraft((d) => ({ ...d, name: '', tags: '', note: '', planId: undefined, routineId: undefined }))
     setNoteOpen(false)
     toast('Guardada en el backlog', text)
@@ -298,7 +306,7 @@ export default function Page() {
 
   function pickSuggestion(next: Draft) {
     // Si ya escribiste una nota, se conserva.
-    setDraft((d) => ({ ...next, note: d.note }))
+    setDraft((d) => ({ ...next, note: d.note || next.note }))
     setSuggestOpen(false)
     setNoteOpen(false)
   }
@@ -330,16 +338,20 @@ export default function Page() {
   function startWith(next: Draft) {
     if (elapsed > 0 && !window.confirm('Hay una tarea en curso. ¿Descartarla y empezar esta?')) return
     setDraft(next)
-    setNoteOpen(false)
+    setNoteOpen(!!next.note)
+    setActiveTab('Inicio')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    // Sin proyecto no arranca: queda cargada en la caja para elegirlo.
+    if (!next.projectId) {
+      setActive({ base: 0, startedAt: null })
+      return askProject()
+    }
     const t = Date.now()
     setNow(t)
     setActive({ base: 0, startedAt: t, startTime: timeKey(), target: mode.down ? Math.max(1, mode.minutes) * 60 : undefined })
-    setActiveTab('Inicio')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   function repeatTask(task: Task) {
-    const projectId = projects.some((p) => p.id === task.projectId) ? task.projectId : null
     startWith(taskDraft(task))
   }
 
@@ -359,7 +371,7 @@ export default function Page() {
   }
   function planDraft(item: PlanItem): Draft {
     const projectId = known(item.projectId)
-    return { name: item.text, projectId, billable: defaultBillable(projectId, projects, clients), tags: '', note: '', planId: item.id }
+    return { name: item.text, projectId, billable: defaultBillable(projectId, projects, clients), tags: '', note: item.note ?? '', planId: item.id }
   }
   function routineDraft(r: Routine): Draft {
     const projectId = known(r.projectId)
@@ -406,6 +418,7 @@ export default function Page() {
   function saveManual() {
     if (!manual) return
     if (!manual.name.trim()) return setManualError('Ponele un nombre a la tarea.')
+    if (!manual.projectId) return setManualError('Elegí un proyecto: de un cliente o personal.')
     const a = minutesOf(manual.from)
     const b = minutesOf(manual.to)
     if (Number.isNaN(a) || Number.isNaN(b)) return setManualError('Completá el horario de inicio y de fin.')
@@ -504,7 +517,7 @@ export default function Page() {
               )}
             </div>
             <div className="timer-controls">
-              <ProjectPicker projects={projects} clients={clients} value={draft.projectId} onChange={pickProject} onCreateProject={(p) => setProjects((cur) => [...cur, p])} compact />
+              <ProjectPicker projects={projects} clients={clients} value={draft.projectId} onChange={pickProject} onCreateProject={(p) => setProjects((cur) => [...cur, p])} openKey={pickerKey} compact />
               <label className="tags-input"><Tag /><input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} placeholder="Etiquetas" aria-label="Etiquetas" /></label>
               <button className={`billable-toggle ${noteOpen || draft.note.trim() ? 'billable-on' : ''}`} onClick={() => setNoteOpen((o) => !o)} aria-pressed={noteOpen} title={draft.note.trim() ? `Nota: ${draft.note}` : 'Agregar una nota: qué hiciste, para acordarte después'} aria-label="Nota"><StickyNote /></button>
               {draftCanBill && <button className={`billable-toggle ${draft.billable ? 'billable-on' : ''}`} onClick={() => setDraft({ ...draft, billable: !draft.billable })} aria-pressed={draft.billable} title={draft.billable ? (info.rate > 0 ? `Facturable a ${info.rate} USD/h` : 'Facturable: horas trabajadas para el cliente') : 'No facturable'} aria-label="Facturable"><DollarSign /></button>}
@@ -578,7 +591,7 @@ export default function Page() {
           </section>
         </>}
 
-        {activeTab === 'Tareas' && <TasksView tasks={tasks} backlog={backlog} routines={routines} setRoutines={setRoutines} onStartRoutine={startRoutine} onCreateProject={(p) => setProjects((cur) => [...cur, p])} projects={projects} clients={clients} onStartPlan={startPlanItem} onRemovePlan={removePlan} today={today} onDelete={deleteTask} onDeleteMany={deleteMany} onSetBillable={setBillable} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} onAddManual={openManual} />}
+        {activeTab === 'Tareas' && <TasksView tasks={tasks} backlog={backlog} routines={routines} setRoutines={setRoutines} onStartRoutine={startRoutine} onCreateProject={(p) => setProjects((cur) => [...cur, p])} projects={projects} clients={clients} onStartPlan={startPlanItem} onRemovePlan={removePlan} onUpdatePlan={(item) => setPlan((cur) => cur.map((x) => (x.id === item.id ? item : x)))} today={today} onDelete={deleteTask} onDeleteMany={deleteMany} onSetBillable={setBillable} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} onAddManual={openManual} />}
         {activeTab === 'Estadísticas' && today && <StatsView tasks={tasks} payments={payments} projects={projects} clients={clients} goal={goal} setGoal={setGoal} today={today} />}
         {activeTab === 'Clientes' && <ClientsView clients={clients} projects={projects} tasks={tasks} payments={payments} setClients={setClients} setProjects={setProjects} setTasks={setTasks} setPayments={setPayments} />}
       </div>

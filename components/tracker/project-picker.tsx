@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Check, Folder, Plus, Search } from 'lucide-react'
-import { BILLING_LABEL, NO_CLIENT, NO_PROJECT, NO_PROJECT_COLOR, PALETTE, billingOf, parseAmount, uid, type Client, type Project } from '@/lib/game'
+import { BILLING_LABEL, PERSONAL, PALETTE, billingOf, parseAmount, uid, type Client, type Project } from '@/lib/game'
 
 function rateLabel(p: Project) {
   const b = billingOf(p)
@@ -17,9 +17,10 @@ type Props = {
   onChange: (projectId: string | null) => void
   onCreateProject: (project: Project) => void
   compact?: boolean
+  openKey?: number // al cambiar, se abre solo (ej. al querer empezar sin proyecto)
 }
 
-export function ProjectPicker({ projects, clients, value, onChange, onCreateProject, compact }: Props) {
+export function ProjectPicker({ projects, clients, value, onChange, onCreateProject, compact, openKey }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
@@ -27,6 +28,10 @@ export function ProjectPicker({ projects, clients, value, onChange, onCreateProj
   const ref = useRef<HTMLDivElement>(null)
   const selected = projects.find((p) => p.id === value) ?? null
   const selectedClient = selected ? clients.find((c) => c.id === selected.clientId) : null
+
+  useEffect(() => {
+    if (openKey) setOpen(true)
+  }, [openKey])
 
   useEffect(() => {
     if (!open) return
@@ -46,7 +51,7 @@ export function ProjectPicker({ projects, clients, value, onChange, onCreateProj
   }
   const groups = [
     ...clients.map((c) => ({ id: c.id, name: c.name, color: c.color, items: projects.filter((p) => p.clientId === c.id && matches(p)) })),
-    { id: '', name: NO_CLIENT, color: '', items: projects.filter((p) => (!p.clientId || !clients.some((c) => c.id === p.clientId)) && matches(p)) },
+    { id: '', name: PERSONAL, color: '', items: projects.filter((p) => (!p.clientId || !clients.some((c) => c.id === p.clientId)) && matches(p)) },
   ].filter((g) => g.items.length > 0)
 
   function pick(id: string | null) {
@@ -76,16 +81,15 @@ export function ProjectPicker({ projects, clients, value, onChange, onCreateProj
     <div className="picker" ref={ref}>
       <button type="button" className={`picker-button ${selected ? 'picker-set' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="listbox">
         {selected ? <i className="dot" style={{ background: selected.color }} /> : <Folder />}
-        <span className="picker-label">{selected ? selected.name : compact ? 'Proyecto' : NO_PROJECT}{selectedClient && <small> · {selectedClient.name}</small>}</span>
+        <span className="picker-label">{selected ? selected.name : 'Elegí un proyecto'}{selectedClient && <small> · {selectedClient.name}</small>}</span>
         {selected && <span className="picker-rate">{rateLabel(selected)}</span>}
       </button>
       {open && (
         <div className="picker-pop" role="listbox">
           {!creating ? (
             <>
-              <label className="picker-search"><Search /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar proyecto o cliente" /></label>
+              <div className="picker-search"><Search /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar proyecto o cliente" aria-label="Buscar proyecto o cliente" /></div>
               <div className="picker-list">
-                <button type="button" className={`picker-item ${!value ? 'picker-active' : ''}`} onClick={() => pick(null)}><i className="dot" style={{ background: NO_PROJECT_COLOR }} />{NO_PROJECT}{!value && <Check className="picker-check" />}</button>
                 {groups.map((g) => (
                   <div key={g.id || 'none'}>
                     <p className="picker-group">{g.name}</p>
@@ -98,7 +102,7 @@ export function ProjectPicker({ projects, clients, value, onChange, onCreateProj
                     ))}
                   </div>
                 ))}
-                {groups.length === 0 && q && <p className="picker-empty">No hay proyectos con “{query}”.</p>}
+                {groups.length === 0 && <p className="picker-empty">{q ? `No hay proyectos con “${query}”.` : 'Todavía no hay proyectos. Creá uno: de un cliente o personal.'}</p>}
               </div>
               <button type="button" className="picker-create" onClick={() => { setCreating(true); setDraft((d) => ({ ...d, name: query })) }}><Plus /> Crear proyecto nuevo</button>
             </>
@@ -107,7 +111,7 @@ export function ProjectPicker({ projects, clients, value, onChange, onCreateProj
               <p className="picker-group">{draft.clientId ? 'Nuevo proyecto por hora' : 'Nuevo proyecto personal'}</p>
               <input autoFocus placeholder="Nombre del proyecto" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && create()} />
               <select value={draft.clientId} onChange={(e) => setDraft({ ...draft, clientId: e.target.value })} aria-label="Cliente">
-                <option value="">{NO_CLIENT}</option>
+                <option value="">{PERSONAL}</option>
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
               {draft.clientId && <label className="rate-input"><span>Tarifa</span><input inputMode="decimal" placeholder="0" value={draft.rate} onChange={(e) => setDraft({ ...draft, rate: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && create()} /><span>USD/h</span></label>}

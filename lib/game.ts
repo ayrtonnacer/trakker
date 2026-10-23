@@ -48,7 +48,7 @@ export type Action = { id: string; text: string; done: boolean }
 export type Goal = { baseline: number; pct: number; months: number; start: string; milestones: number[]; actions: Action[] }
 
 /** date vacío = backlog: tarea pendiente sin día asignado. */
-export type PlanItem = { id: string; date: string; text: string; projectId: string | null; hours: number; done: boolean }
+export type PlanItem = { id: string; date: string; text: string; projectId: string | null; hours: number; done: boolean; note?: string }
 
 /** Tarea que se repite ciertos días de la semana (0 = domingo … 6 = sábado). */
 export type Routine = { id: string; text: string; projectId: string | null; days: number[]; tags: string[] }
