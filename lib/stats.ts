@@ -1,4 +1,4 @@
-import { NO_CLIENT, NO_PROJECT, PERSONAL, NO_PROJECT_COLOR, dateKey, type Client, type Payment, type Project, type Task } from './game'
+import { NO_CLIENT, NO_PROJECT, PERSONAL, NO_PROJECT_COLOR, billingOf, dateKey, type Client, type Payment, type Project, type Task } from './game'
 
 export type Period = 'hoy' | 'semana' | 'mes' | 'año' | 'todo'
 
@@ -28,6 +28,9 @@ export type Entry = {
   color: string
   tags: string[]
   isTask: boolean
+  /** Segundos que entran en el "valor de la hora" y lo que valen: ver `withHourlyValue`. */
+  valueSeconds: number
+  imputed: number
 }
 
 function noon(key: string) {
@@ -55,13 +58,46 @@ export function buildEntries(tasks: Task[], payments: Payment[], projects: Proje
   }
   const fromTasks = tasks.map((t) => ({
     date: t.date, seconds: t.seconds, amount: t.amount, billable: t.billable, projectId: t.projectId,
-    name: t.name, tags: t.tags, isTask: true, ...names(t.projectId, t.project, t.client, t.color),
+    name: t.name, tags: t.tags, isTask: true, valueSeconds: 0, imputed: 0, ...names(t.projectId, t.project, t.client, t.color),
   }))
   const fromPayments = payments.filter((p) => p.paid).map((p) => ({
     date: p.date, seconds: 0, amount: p.amount, billable: true, projectId: p.projectId,
-    name: p.label || 'Pago', tags: [], isTask: false, ...names(p.projectId, NO_PROJECT, NO_CLIENT, NO_PROJECT_COLOR),
+    name: p.label || 'Pago', tags: [], isTask: false, valueSeconds: 0, imputed: 0, ...names(p.projectId, NO_PROJECT, NO_CLIENT, NO_PROJECT_COLOR),
   }))
-  return [...fromTasks, ...fromPayments]
+  return withHourlyValue([...fromTasks, ...fromPayments], projectById)
+}
+
+/**
+ * Valor de la hora que no depende de cuándo cobrás. Por hora: lo que dio la tarea. Presupuesto o
+ * entrega: lo cobrado en todo el proyecto ÷ sus horas facturables, aplicado a las horas de cada
+ * tarea (así un pago grande no infla la semana en que llega). Un presupuesto que todavía no
+ * terminó ni se cobró completo, o que no cobró nada, queda afuera hasta que haya con qué medirlo.
+ */
+function withHourlyValue(entries: Entry[], projectById: Map<string, Project>): Entry[] {
+  const totals = new Map<string, { seconds: number; paid: number }>()
+  for (const e of entries) {
+    if (!e.projectId) continue
+    const t = totals.get(e.projectId) ?? { seconds: 0, paid: 0 }
+    if (e.billable) t.seconds += e.seconds
+    t.paid += e.amount
+    totals.set(e.projectId, t)
+  }
+  const rateOf = (projectId: string | null) => {
+    const p = projectId ? projectById.get(projectId) : undefined
+    const t = projectId ? totals.get(projectId) : undefined
+    if (!p || !t || t.seconds <= 0 || t.paid <= 0) return 0
+    const billing = billingOf(p)
+    if (billing === 'interno') return 0
+    if (billing === 'fijo' && (p.price ?? 0) > 0 && p.status !== 'terminado' && t.paid < (p.price ?? 0)) return 0
+    return t.paid / (t.seconds / 3600)
+  }
+  return entries.map((e) => {
+    if (!e.isTask || !e.billable || e.seconds <= 0) return e
+    const p = e.projectId ? projectById.get(e.projectId) : undefined
+    if (p && billingOf(p) === 'hora') return e.amount > 0 ? { ...e, valueSeconds: e.seconds, imputed: e.amount } : e
+    const rate = rateOf(e.projectId)
+    return rate > 0 ? { ...e, valueSeconds: e.seconds, imputed: (e.seconds / 3600) * rate } : e
+  })
 }
 
 /** Rango de fechas (inclusive) del período, desplazado `offset` períodos hacia atrás o adelante. */
@@ -91,7 +127,7 @@ export function periodRange(period: Period, offset: number, today: string, entri
   return { from: noon(first), to: t, label: 'Desde el principio' }
 }
 
-export type Group = { key: string; name: string; color: string; seconds: number; amount: number; billableSeconds: number; count: number; pct: number; amountPct: number }
+export type Group = { key: string; name: string; color: string; seconds: number; amount: number; billableSeconds: number; valueSeconds: number; imputed: number; count: number; pct: number; amountPct: number }
 export type Bin = { key: string; label: string; title: string; seconds: number; amount: number; isCurrent: boolean }
 
 export type GroupBy = 'cliente' | 'proyecto' | 'etiqueta' | 'tarea'
@@ -101,10 +137,12 @@ export function groupEntries(entries: Entry[], by: GroupBy, clientColors: Map<st
   const totalSeconds = entries.reduce((s, t) => s + t.seconds, 0) || 1
   const totalAmount = entries.reduce((s, t) => s + t.amount, 0) || 1
   const add = (key: string, name: string, color: string, e: Entry) => {
-    const g = map.get(key) ?? { key, name, color, seconds: 0, amount: 0, billableSeconds: 0, count: 0, pct: 0, amountPct: 0 }
+    const g = map.get(key) ?? { key, name, color, seconds: 0, amount: 0, billableSeconds: 0, valueSeconds: 0, imputed: 0, count: 0, pct: 0, amountPct: 0 }
     g.seconds += e.seconds
     g.amount += e.amount
     if (e.billable) g.billableSeconds += e.seconds
+    g.valueSeconds += e.valueSeconds
+    g.imputed += e.imputed
     if (e.isTask) g.count++
     map.set(key, g)
   }
@@ -139,6 +177,8 @@ export function computeStats(all: Entry[], period: Period, offset: number, today
   // Promedio diario sobre los días del período que ya pasaron.
   const lastDay = toKey > today ? noon(today) : range.to
   const elapsedDays = Math.max(1, Math.round((lastDay.getTime() - range.from.getTime()) / 86400000) + 1)
+  const valueSeconds = entries.reduce((s, t) => s + t.valueSeconds, 0)
+  const imputed = entries.reduce((s, t) => s + t.imputed, 0)
   const workedDays = new Set(tasks.map((t) => t.date)).size
 
   // Barras: por día salvo año y todo, que van por mes.
@@ -185,7 +225,7 @@ export function computeStats(all: Entry[], period: Period, offset: number, today
     billablePct: seconds ? Math.round((billableSeconds / seconds) * 100) : 0,
     avgDaily: seconds / elapsedDays,
     avgDailyAmount: amount / elapsedDays,
-    perHour: seconds ? amount / (seconds / 3600) : 0,
+    perHour: valueSeconds ? imputed / (valueSeconds / 3600) : 0,
     workedDays,
     bins,
     byMonth,

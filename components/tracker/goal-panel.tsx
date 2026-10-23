@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Carrot, Check, Plus, X } from 'lucide-react'
+import { Carrot, Check, ChevronDown, Plus, Target, X } from 'lucide-react'
 import {
   addMonths,
   fmtShort,
@@ -17,6 +17,7 @@ import {
 } from '@/lib/game'
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+const MONTHS_LONG = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 
 type Props = {
   goal: Goal | null
@@ -33,10 +34,11 @@ function monthLabel(m: string) {
   return `${MONTHS[mm - 1]} ${y}`
 }
 
-/** Meta de ingresos: el objetivo de cada mes y sus micro objetivos (la zanahoria de Inicio). */
+/** Meta de ingresos, siempre la del mes en curso (no cambia con el período de las estadísticas): el objetivo de cada mes y sus micro objetivos (la zanahoria de Inicio). */
 export function GoalPanel({ goal, setGoal, tasks, payments, today }: Props) {
   const thisMonth = today.slice(0, 7)
   const [draft, setDraft] = useState<GoalDraft | null>(null)
+  const [open, setOpen] = useState(false)
   const suggested = useMemo(() => suggestedBaseline(thisMonth, tasks, payments), [thisMonth, tasks, payments])
 
   function openDraft() {
@@ -65,45 +67,58 @@ export function GoalPanel({ goal, setGoal, tasks, payments, today }: Props) {
   const finalTarget = goal ? Math.round(goal.baseline * (1 + goal.pct / 100)) : 0
   const target = goalTarget(goal, thisMonth)
   const earned = monthEarnings(thisMonth, tasks, payments)
+  const pct = target > 0 ? Math.min(100, Math.round((earned / target) * 100)) : 0
   const steps = milestonesFor(goal, target)
   const previewTarget = draft ? Math.round(parseAmount(draft.baseline) * (1 + ((Number(draft.pct) || 0) / 100) / Math.max(1, Math.round(Number(draft.months) || 1)))) : 0
   const maxMonth = Math.max(finalTarget, ...months.map((m) => monthEarnings(m, tasks, payments)), 1)
 
   return (
     <>
-        <article className="panel goal-panel" id="meta">
-          <div className="panel-heading"><h3>Meta de ingresos</h3>{goal && <button className="text-button" onClick={openDraft}>Editar</button>}</div>
+        <article className={`panel goal-panel ${open ? 'is-open' : ''}`} id="meta">
           {!goal ? (
-            <div className="goal-empty">
-              <p>Ej.: “Aumentar mis ingresos un 20% en 3 meses”. Tomamos como base tu promedio mensual{suggested ? ` (US$ ${fmtShort(suggested)} en los últimos meses)` : ''} y te armamos un objetivo para cada mes.</p>
+            <div className="goal-compact">
+              <span className="goal-compact-title"><Target /> Meta de ingresos</span>
+              <span className="goal-compact-hint">Ej.: “Aumentar mis ingresos un 20% en 3 meses”.{suggested ? ` Tu base sería US$ ${fmtShort(suggested)}/mes.` : ''}</span>
               <button className="primary-button" onClick={openDraft}><Plus /> Definir meta</button>
             </div>
           ) : (
             <>
-              <p className="goal-sentence">Pasar de <b>US$ {fmtShort(goal.baseline)}</b> a <b>US$ {fmtShort(finalTarget)}</b> por mes (+{goal.pct}%) para {monthLabel(addMonths(goal.start, goal.months - 1))}.</p>
-              {target > 0 && (
-                <div className="goal-now">
-                  <div className="goal-now-top"><span>Este mes</span><strong>US$ {fmtShort(Math.round(earned))} <small>/ {fmtShort(target)}</small></strong></div>
-                  <div className="thin-track big"><div style={{ width: `${Math.min(100, (earned / target) * 100)}%` }} />{steps.map((m) => <i key={m} className={`track-mark ${earned >= m ? 'done' : ''}`} style={{ left: `${(m / target) * 100}%` }} />)}</div>
-                  <div className="goal-steps">{steps.map((m) => <span key={m} className={earned >= m ? 'done' : ''}>{earned >= m ? <Check /> : <Carrot />} {fmtShort(m)}</span>)}</div>
+              <button className="goal-compact" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+                <span className="goal-compact-title"><Target /> Meta de {MONTHS_LONG[Number(thisMonth.slice(5, 7)) - 1]}</span>
+                {target > 0 ? (
+                  <>
+                    <strong className="goal-compact-pct">{pct}%</strong>
+                    <span className="thin-track big goal-compact-track"><span style={{ width: `${pct}%` }} />{steps.map((m) => <i key={m} className={`track-mark ${earned >= m ? 'done' : ''}`} style={{ left: `${(m / target) * 100}%` }} />)}</span>
+                    <span className="goal-compact-amount">US$ {fmtShort(Math.round(earned))} <small>de {fmtShort(target)}</small></span>
+                  </>
+                ) : <span className="goal-compact-hint">Sin objetivo para este mes · {monthLabel(goal.start)} → {monthLabel(addMonths(goal.start, goal.months - 1))}</span>}
+                <ChevronDown className="goal-chevron" />
+              </button>
+              {open && (
+                <div className="goal-detail">
+                  <div className="goal-detail-top">
+                    <p className="goal-sentence">Pasar de <b>US$ {fmtShort(goal.baseline)}</b> a <b>US$ {fmtShort(finalTarget)}</b> por mes (+{goal.pct}%) para {monthLabel(addMonths(goal.start, goal.months - 1))}.</p>
+                    <button className="text-button" onClick={openDraft}>Editar</button>
+                  </div>
+                  {target > 0 && <div className="goal-steps">{steps.map((m) => <span key={m} className={earned >= m ? 'done' : ''}>{earned >= m ? <Check /> : <Carrot />} {fmtShort(m)}</span>)}</div>}
+                  <div className="month-bars">
+                    {months.map((m, i) => {
+                      const actual = monthEarnings(m, tasks, payments)
+                      const t = i === 0 ? goal.baseline : goalTarget(goal, m)
+                      return (
+                        <div key={m} className={`month-bar ${m === thisMonth ? 'is-current' : ''}`} title={`${monthLabel(m)}: US$ ${fmtShort(Math.round(actual))}${i === 0 ? ' (mes anterior al plan)' : ` · objetivo ${fmtShort(t)}`}`}>
+                          <div className="month-bar-area">
+                            <i className="month-target" style={{ bottom: `${(t / maxMonth) * 100}%` }} />
+                            <div className={`month-fill ${actual >= t && i > 0 ? 'hit' : ''}`} style={{ height: `${(actual / maxMonth) * 100}%` }} />
+                          </div>
+                          <span>{monthLabel(m)}</span>
+                          <small>{i === 0 ? 'base' : `${fmtShort(t)}`}</small>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
-              <div className="month-bars">
-                {months.map((m, i) => {
-                  const actual = monthEarnings(m, tasks, payments)
-                  const t = i === 0 ? goal.baseline : goalTarget(goal, m)
-                  return (
-                    <div key={m} className={`month-bar ${m === thisMonth ? 'is-current' : ''}`} title={`${monthLabel(m)}: US$ ${fmtShort(Math.round(actual))}${i === 0 ? ' (mes anterior al plan)' : ` · objetivo ${fmtShort(t)}`}`}>
-                      <div className="month-bar-area">
-                        <i className="month-target" style={{ bottom: `${(t / maxMonth) * 100}%` }} />
-                        <div className={`month-fill ${actual >= t && i > 0 ? 'hit' : ''}`} style={{ height: `${(actual / maxMonth) * 100}%` }} />
-                      </div>
-                      <span>{monthLabel(m)}</span>
-                      <small>{i === 0 ? 'base' : `${fmtShort(t)}`}</small>
-                    </div>
-                  )
-                })}
-              </div>
             </>
           )}
         </article>
