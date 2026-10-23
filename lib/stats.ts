@@ -1,11 +1,12 @@
 import { NO_CLIENT, NO_PROJECT, PERSONAL, NO_PROJECT_COLOR, billingOf, dateKey, type Client, type Payment, type Project, type Task } from './game'
 
-export type Period = 'hoy' | 'semana' | 'mes' | 'año' | 'todo'
+export type Period = 'hoy' | 'semana' | 'mes' | 'trimestre' | 'año' | 'todo'
 
 export const PERIODS: { id: Period; label: string }[] = [
   { id: 'hoy', label: 'Hoy' },
   { id: 'semana', label: 'Semana' },
   { id: 'mes', label: 'Mes' },
+  { id: 'trimestre', label: 'Trimestre' },
   { id: 'año', label: 'Año' },
   { id: 'todo', label: 'Todo' },
 ]
@@ -118,6 +119,12 @@ export function periodRange(period: Period, offset: number, today: string, entri
     const from = new Date(t.getFullYear(), t.getMonth() + offset, 1, 12)
     const to = new Date(from.getFullYear(), from.getMonth() + 1, 0, 12)
     return { from, to, label: `${MONTHS[from.getMonth()]} ${from.getFullYear()}` }
+  }
+  if (period === 'trimestre') {
+    const q = Math.floor(t.getMonth() / 3) + offset
+    const from = new Date(t.getFullYear(), q * 3, 1, 12)
+    const to = new Date(from.getFullYear(), from.getMonth() + 3, 0, 12)
+    return { from, to, label: `${MONTHS_SHORT[from.getMonth()]} – ${MONTHS_SHORT[to.getMonth()]} ${to.getFullYear()}` }
   }
   if (period === 'año') {
     const y = t.getFullYear() + offset

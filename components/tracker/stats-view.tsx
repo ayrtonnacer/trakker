@@ -85,21 +85,21 @@ export function StatsView({ tasks, payments, projects, clients, goal, setGoal, t
   const goalMonth = period === 'mes' ? dateKey(s.range.from).slice(0, 7) : today.slice(0, 7)
   const monthTarget = goalTarget(goal, goalMonth)
   const daysInMonth = new Date(Number(goalMonth.slice(0, 4)), Number(goalMonth.slice(5, 7)), 0).getDate()
-  const lineGoal = !s.byMonth && monthTarget ? monthTarget / daysInMonth : 0
+  const lineGoal = !s.byMonth && period !== 'trimestre' && monthTarget ? monthTarget / daysInMonth : 0
   const binTargets = s.byMonth ? s.bins.map((b) => goalTarget(goal, b.key)) : []
 
   return (
     <section className="view">
       <div className="view-heading">
         <div><h2>Estadísticas</h2><p className="view-sub">Tiempo y plata por día, mes, cliente y proyecto. Los cobros de proyectos con presupuesto se suman en la fecha en que los cobraste.</p></div>
-        <div className="segmented" role="tablist" aria-label="Período">
-          {PERIODS.map((p) => <button key={p.id} role="tab" aria-selected={period === p.id} className={period === p.id ? 'seg-on' : ''} onClick={() => { setPeriod(p.id); setOffset(0) }}>{p.label}</button>)}
-        </div>
       </div>
 
       <GoalPanel goal={goal} setGoal={setGoal} tasks={tasks} payments={payments} today={today} />
 
       <div className="stats-toolbar">
+        <div className="segmented wrap" role="tablist" aria-label="Período">
+          {PERIODS.map((p) => <button key={p.id} role="tab" aria-selected={period === p.id} className={period === p.id ? 'seg-on' : ''} onClick={() => { setPeriod(p.id); setOffset(0) }}>{p.label}</button>)}
+        </div>
         <div className="range-nav">
           <button onClick={() => setOffset((o) => o - 1)} disabled={period === 'todo'} aria-label="Período anterior"><ChevronLeft /></button>
           <strong>{s.range.label}</strong>

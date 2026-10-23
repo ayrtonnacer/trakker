@@ -38,7 +38,7 @@ function monthLabel(m: string) {
 export function GoalPanel({ goal, setGoal, tasks, payments, today }: Props) {
   const thisMonth = today.slice(0, 7)
   const [draft, setDraft] = useState<GoalDraft | null>(null)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const suggested = useMemo(() => suggestedBaseline(thisMonth, tasks, payments), [thisMonth, tasks, payments])
 
   function openDraft() {
