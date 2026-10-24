@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, DollarSign, ExternalLink, Flame, History, Home, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Repeat, Square, StickyNote, Tag, Users, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, DollarSign, Flame, History, Home, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Repeat, Square, StickyNote, Tag, Users, X } from 'lucide-react'
 import {
   buildTask,
   canBill,
@@ -23,6 +23,7 @@ import {
   timeKey,
   uid,
   type Client,
+  resourceLinks,
   type Goal,
   type Payment,
   type PlanItem,
@@ -31,6 +32,7 @@ import {
   type Task,
 } from '@/lib/game'
 import { ClientsView } from '@/components/tracker/clients-view'
+import { LinkChip } from '@/components/tracker/link-chip'
 import { ProjectPicker } from '@/components/tracker/project-picker'
 import { StatsView } from '@/components/tracker/stats-view'
 import { TaskRow } from '@/components/tracker/task-row'
@@ -46,7 +48,7 @@ const WEEKDAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes
 const TABS: { id: string; icon: typeof Home }[] = [
   { id: 'Inicio', icon: Home },
   { id: 'Tareas', icon: ListChecks },
-  { id: 'Clientes', icon: Users },
+  { id: 'Plataformas', icon: Users },
   { id: 'Estadísticas', icon: BarChart3 },
 ]
 
@@ -534,7 +536,7 @@ export default function Page() {
             {running && active.target && <span>Cuenta regresiva de {fmtHours(active.target)}: al llegar a cero se registra sola</span>}
             {running && liveGold > 0 && <span>+US$ {fmtMoney(liveGold)} · {info.rate} USD/h</span>}
             {running && info.billing !== 'hora' && <span>{info.billing === 'interno' ? 'Proyecto personal: suma tiempo, no plata' : 'Se cobra por pagos: el tiempo te muestra cuánto rinde la hora'}</span>}
-            {info.client?.links?.map((l, i) => <a key={i} className="link-chip" href={l.url} target="_blank" rel="noreferrer noopener"><ExternalLink /> {l.label}</a>)}
+            {resourceLinks(info.project, info.client).map((l, i) => <LinkChip key={i} link={l} />)}
             {!running && suggestedTags.length > 0 && <span className="tag-suggestions">{suggestedTags.map((t) => <button key={t} onClick={() => addTag(t)}>+ {t}</button>)}</span>}
           </div>
 
@@ -593,7 +595,7 @@ export default function Page() {
 
         {activeTab === 'Tareas' && <TasksView tasks={tasks} backlog={backlog} routines={routines} setRoutines={setRoutines} onStartRoutine={startRoutine} onCreateProject={(p) => setProjects((cur) => [...cur, p])} projects={projects} clients={clients} onStartPlan={startPlanItem} onRemovePlan={removePlan} onUpdatePlan={(item) => setPlan((cur) => cur.map((x) => (x.id === item.id ? item : x)))} today={today} onDelete={deleteTask} onDeleteMany={deleteMany} onSetBillable={setBillable} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} onAddManual={openManual} />}
         {activeTab === 'Estadísticas' && today && <StatsView tasks={tasks} payments={payments} projects={projects} clients={clients} goal={goal} setGoal={setGoal} today={today} />}
-        {activeTab === 'Clientes' && <ClientsView clients={clients} projects={projects} tasks={tasks} payments={payments} setClients={setClients} setProjects={setProjects} setTasks={setTasks} setPayments={setPayments} />}
+        {activeTab === 'Plataformas' && <ClientsView clients={clients} projects={projects} tasks={tasks} payments={payments} setClients={setClients} setProjects={setProjects} setTasks={setTasks} setPayments={setPayments} />}
       </div>
 
       <nav className="bottom-nav" aria-label="Navegación móvil">{TABS.map(({ id, icon: Icon }) => <button key={id} className={activeTab === id ? 'mobile-active' : ''} onClick={() => setActiveTab(id)}><Icon /><span>{id === 'Estadísticas' ? 'Stats' : id}</span></button>)}</nav>

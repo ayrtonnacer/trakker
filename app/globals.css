@@ -340,7 +340,14 @@ a { color: inherit; }
 .client-title > span { color: var(--muted); font-size: 12px; }
 .status-pill { border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: 500; }
 .status-activo { color: #448361; background: rgba(68,131,97,.12); }
-.status-potencial { color: #2f6f9f; background: rgba(47,111,159,.12); }
+.status-prospecto, .status-potencial { color: #2f6f9f; background: rgba(47,111,159,.12); }
+.status-aplicado { color: #9065b0; background: rgba(144,101,176,.14); }
+.status-onboarding { color: #d9730d; background: rgba(217,115,13,.14); }
+.status-cerrado { color: var(--faint); background: var(--soft); text-decoration: line-through; }
+.project-links { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 8px 34px; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset-chip { border: 1px dashed var(--line-strong); border-radius: 5px; padding: 3px 9px; color: var(--muted); background: none; font-size: 12px; }
+.preset-chip:hover { color: var(--text); background: var(--hover); }
 .status-pausado { color: var(--muted); background: var(--soft); }
 .client-extra { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 14px 12px 70px; }
 .client-notes { width: 100%; margin: 2px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
