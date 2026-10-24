@@ -31,7 +31,7 @@ export function tasksToMarkdown(tasks: Task[], title: string, opts: { forClient?
       !opts.forClient && !t.billable && t.client !== 'Sin cliente' ? 'no facturable' : '',
       t.tags.length ? t.tags.map((x) => `#${x}`).join(' ') : '',
     ].filter(Boolean).join(' · ')
-    out.push(`- **${t.name}** — ${extra}`)
+    out.push(`- **${t.name}**${t.ref ? ` (ID ${t.ref})` : ''} — ${extra}`)
     if (t.note) out.push(...t.note.split('\n').map((l) => `  > ${l}`))
   }
   out.push('')
@@ -44,9 +44,9 @@ const csvCell = (v: string | number) => {
 }
 
 export function tasksToCsv(tasks: Task[]) {
-  const head = ['Fecha', 'Inicio', 'Tarea', 'Proyecto', 'Cliente', 'Duración', 'Horas', 'Facturable', 'Tarifa USD/h', 'US$', 'Etiquetas', 'Notas']
+  const head = ['Fecha', 'Inicio', 'Tarea', 'Proyecto', 'Plataforma', 'Duración', 'Horas', 'Facturable', 'Tarifa USD/h', 'US$', 'Etiquetas', 'Notas']
   const rows = [...tasks].sort(byDate).map((t) => [
-    t.date, t.start ?? '', t.name, t.project, t.client, fmtClock(t.seconds), (t.seconds / 3600).toFixed(2),
+    t.date, t.start ?? '', t.ref ? `${t.name} (ID ${t.ref})` : t.name, t.project, t.client, fmtClock(t.seconds), (t.seconds / 3600).toFixed(2),
     t.billable ? 'sí' : 'no', t.rate, t.amount.toFixed(2), t.tags.join(', '), t.note ?? '',
   ])
   // BOM: así Excel abre bien las tildes.

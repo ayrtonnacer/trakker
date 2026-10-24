@@ -51,7 +51,7 @@ export function SyncModal({ cfg, status, message, lastSync, onConnect, onDisconn
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose} aria-label="Cerrar"><X /></button>
         <h2>Guardar en GitHub</h2>
-        <p>Tus tareas, clientes, pagos y metas se guardan como archivos <b>.md</b> en un repo tuyo y se leen de ahí al abrir la app, en cualquier dispositivo.</p>
+        <p>Tus tareas, plataformas, pagos y metas se guardan como archivos <b>.md</b> en un repo tuyo y se leen de ahí al abrir la app, en cualquier dispositivo.</p>
 
         {cfg ? (
           <>
@@ -68,7 +68,7 @@ export function SyncModal({ cfg, status, message, lastSync, onConnect, onDisconn
         ) : (
           <>
             <ol className="sync-steps">
-              <li>Creá un repo <b>privado</b> vacío en GitHub, por ejemplo <code>trakker-datos</code>. Tiene ingresos y clientes: no lo hagas público.</li>
+              <li>Creá un repo <b>privado</b> vacío en GitHub, por ejemplo <code>trakker-datos</code>. Tiene tus ingresos y plataformas: no lo hagas público.</li>
               <li>En GitHub: Settings → Developer settings → Personal access tokens → <b>Fine-grained tokens</b> → Generate new token.</li>
               <li>En “Repository access” elegí <b>Only select repositories</b> y marcá solo ese repo. En Permissions → Repository permissions poné <b>Contents: Read and write</b>.</li>
               <li>Copiá el token y pegalo acá. Queda guardado solo en este navegador.</li>

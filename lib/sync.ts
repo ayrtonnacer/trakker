@@ -49,13 +49,13 @@ function tasksFile(month: string, tasks: Task[]) {
   const sorted = [...tasks].sort(byDateStart)
   const seconds = sorted.reduce((s, t) => s + t.seconds, 0)
   const amount = sorted.reduce((s, t) => s + t.amount, 0)
-  const rows = sorted.map((t) => `| ${t.date} | ${t.start ?? ''} | ${cell(t.name)} | ${cell(t.project)} | ${cell(t.client)} | ${fmtClock(t.seconds)} | ${t.billable ? 'sí' : 'no'} | ${t.amount.toFixed(2)} | ${cell(t.tags.join(', '))} | ${cell(t.note ?? '')} |`)
+  const rows = sorted.map((t) => `| ${t.date} | ${t.start ?? ''} | ${cell(t.ref ? `${t.name} (ID ${t.ref})` : t.name)} | ${cell(t.project)} | ${cell(t.client)} | ${fmtClock(t.seconds)} | ${t.billable ? 'sí' : 'no'} | ${t.amount.toFixed(2)} | ${cell(t.tags.join(', '))} | ${cell(t.note ?? '')} |`)
   return [
     `# Tareas ${month}`,
     '',
     `**${sorted.length} tareas · ${fmtClock(seconds)} · US$ ${fmtMoney(amount)}**`,
     '',
-    '| Fecha | Inicio | Tarea | Proyecto | Cliente | Duración | Facturable | US$ | Etiquetas | Notas |',
+    '| Fecha | Inicio | Tarea | Proyecto | Plataforma | Duración | Facturable | US$ | Etiquetas | Notas |',
     '|---|---|---|---|---|---|---|---:|---|---|',
     ...rows,
     '',
@@ -64,7 +64,7 @@ function tasksFile(month: string, tasks: Task[]) {
 }
 
 function clientsFile(d: AppData) {
-  const out = ['# Clientes y proyectos', '']
+  const out = ['# Plataformas y proyectos', '']
   const projectName = new Map(d.projects.map((p) => [p.id, p.name]))
   const billing = (p: Project) => {
     const b = p.billing ?? 'hora'

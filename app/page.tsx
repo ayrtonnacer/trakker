@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, DollarSign, Flame, History, Home, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Repeat, Square, StickyNote, Tag, Users, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, Copy, DollarSign, Flame, History, Home, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Repeat, Square, StickyNote, Tag, Users, X } from 'lucide-react'
 import {
   buildTask,
   canBill,
@@ -23,6 +23,8 @@ import {
   timeKey,
   uid,
   type Client,
+  looksLikeId,
+  shortRef,
   resourceLinks,
   type Goal,
   type Payment,
@@ -33,6 +35,7 @@ import {
 } from '@/lib/game'
 import { ClientsView } from '@/components/tracker/clients-view'
 import { LinkChip } from '@/components/tracker/link-chip'
+import { AutoTextarea } from '@/components/tracker/memo'
 import { ProjectPicker } from '@/components/tracker/project-picker'
 import { StatsView } from '@/components/tracker/stats-view'
 import { TaskRow } from '@/components/tracker/task-row'
@@ -54,9 +57,9 @@ const TABS: { id: string; icon: typeof Home }[] = [
 
 type Active = { base: number; startedAt: number | null; startTime?: string; target?: number } // target: segundos de la cuenta regresiva
 type Mode = { down: boolean; minutes: number }
-type Draft = { name: string; projectId: string | null; billable: boolean; tags: string; note: string; planId?: string; routineId?: string } // planId: viene del backlog; routineId: de una rutina
+type Draft = { name: string; projectId: string | null; billable: boolean; tags: string; note: string; ref?: string; planId?: string; routineId?: string } // planId: viene del backlog; routineId: de una rutina
 type Toast = { id: number; title: string; text: string }
-type Manual = { id?: number; rate?: number; routineId?: string; name: string; projectId: string | null; billable: boolean; tags: string; note: string; date: string; from: string; to: string }
+type Manual = { id?: number; rate?: number; routineId?: string; ref: string; name: string; projectId: string | null; billable: boolean; tags: string; note: string; date: string; from: string; to: string }
 type Piece = { id: number; x: number; y: number; r: number; d: number; s: number; round: boolean }
 
 const DEFAULT_MODE: Mode = { down: false, minutes: 30 }
@@ -65,22 +68,20 @@ const EMPTY_DRAFT: Draft = { name: '', projectId: null, billable: false, tags: '
 
 function seedData(today: string) {
   const clients: Client[] = [
-    { id: 'c-outlier', name: 'Outlier', color: '#2f6f9f', status: 'activo', links: [{ label: 'Plataforma', url: 'https://app.outlier.ai' }, { label: 'Pagos', url: 'https://app.outlier.ai/earnings' }], notes: 'AI trainer. Pagan semanal, martes a la noche (hora del Pacífico).' },
-    { id: 'c-norte', name: 'Estudio Norte', color: '#448361', status: 'activo', links: [], notes: '' },
+    { id: 'c-outlier', name: 'Outlier', color: '#2f6f9f', status: 'activo', links: [{ label: 'Plataforma', url: 'https://app.outlier.ai' }, { label: 'Pagos', url: 'https://app.outlier.ai/earnings' }], notes: 'Pagan semanal, martes a la noche (hora del Pacífico).' },
+    { id: 'c-meridial', name: 'Meridial', color: '#d9730d', status: 'onboarding', links: [], notes: 'Onboarding pago por hora.' },
+    { id: 'c-upwork', name: 'Upwork', color: '#448361', status: 'aplicado', links: [{ label: 'Propuestas', url: 'https://www.upwork.com/nx/proposals' }], notes: '' },
   ]
   const projects: Project[] = [
     { id: 'p-ai', name: 'AI trainer', clientId: 'c-outlier', rate: 20, color: '#2f6f9f', billing: 'hora' },
-    { id: 'p-web', name: 'Web institucional', clientId: 'c-norte', rate: 0, price: 2000, color: '#448361', billing: 'fijo' },
-    { id: 'p-mio', name: 'Mi negocio', clientId: null, rate: 0, color: '#787774', billing: 'interno' },
+    { id: 'p-onb', name: 'Onboarding', clientId: 'c-meridial', rate: 15, color: '#d9730d', billing: 'hora' },
+    { id: 'p-mio', name: 'Buscar trabajo', clientId: null, rate: 0, color: '#787774', billing: 'interno' },
   ]
-  const payments: Payment[] = [
-    { id: 'pay-1', projectId: 'p-web', label: 'Adelanto 50%', amount: 1000, date: today, paid: true },
-    { id: 'pay-2', projectId: 'p-web', label: 'Entrega final 50%', amount: 1000, date: today, paid: false },
-  ]
+  const payments: Payment[] = []
   const tasks: Task[] = [
-    buildTask({ id: 1, name: 'Tareas de evaluación', seconds: 9000, projectId: 'p-ai', billable: true, tags: ['ai'], date: today, start: '09:00', projects, clients }),
-    buildTask({ id: 2, name: 'Maquetado home', seconds: 5400, projectId: 'p-web', billable: true, tags: ['diseño'], date: today, start: '12:00', projects, clients }),
-    buildTask({ id: 3, name: 'Mandar propuestas', seconds: 2700, projectId: 'p-mio', billable: false, tags: ['ventas'], date: today, start: '15:00', projects, clients }),
+    buildTask({ id: 1, name: 'Tareas de evaluación', ref: '65f6a8e1-839a-4a72-a42d-78fbb7f8feb6', seconds: 9000, projectId: 'p-ai', billable: true, tags: ['ai'], date: today, start: '09:00', projects, clients }),
+    buildTask({ id: 2, name: 'Curso de onboarding', seconds: 5400, projectId: 'p-onb', billable: true, tags: ['onboarding'], date: today, start: '12:00', projects, clients }),
+    buildTask({ id: 3, name: 'Mandar propuestas en Upwork', seconds: 2700, projectId: 'p-mio', billable: false, tags: ['búsqueda'], date: today, start: '15:00', projects, clients }),
   ]
   return { clients, projects, payments, tasks }
 }
@@ -267,7 +268,7 @@ export default function Page() {
   }
 
   function pickProject(projectId: string | null) {
-    // Un proyecto de un cliente arranca como facturable (se puede cambiar con el $); uno personal, nunca.
+    // Un proyecto de una plataforma arranca como facturable (se puede cambiar con el $); uno personal, nunca.
     setDraft((d) => ({ ...d, projectId, billable: defaultBillable(projectId, projects, clients) }))
   }
 
@@ -277,7 +278,7 @@ export default function Page() {
 
   /** Toda tarea va a un proyecto (de un cliente o personal): si falta, se abre el selector. */
   function askProject() {
-    toast('Elegí un proyecto', 'Cada tarea va a un cliente o a Personal.')
+    toast('Elegí un proyecto', 'Cada tarea va a un proyecto de una plataforma o a Personal.')
     setPickerKey((k) => k + 1)
   }
 
@@ -298,10 +299,10 @@ export default function Page() {
 
   /** Guarda lo escrito en el backlog, sin empezar el timer. */
   function saveForLater() {
-    const text = draft.name.trim()
+    const text = draft.name.trim() || (draft.ref ? `Task ${draft.ref}` : '')
     if (!text) return
     if (!draft.planId) setPlan((cur) => [...cur, { id: uid(), date: '', text, projectId: draft.projectId, hours: 0, done: false, ...(draft.note.trim() ? { note: draft.note.trim() } : {}) }])
-    setDraft((d) => ({ ...d, name: '', tags: '', note: '', planId: undefined, routineId: undefined }))
+    setDraft((d) => ({ ...d, name: '', tags: '', note: '', ref: undefined, planId: undefined, routineId: undefined }))
     setNoteOpen(false)
     toast('Guardada en el backlog', text)
   }
@@ -320,21 +321,31 @@ export default function Page() {
   function discardTask() {
     if (elapsed > 0 && !window.confirm('¿Descartar la tarea en curso sin registrar el tiempo?')) return
     setActive({ base: 0, startedAt: null })
-    setDraft((d) => ({ ...d, name: '', note: '', planId: undefined, routineId: undefined }))
+    setDraft((d) => ({ ...d, name: '', note: '', ref: undefined, planId: undefined, routineId: undefined }))
     setNoteOpen(false)
   }
 
   function stopTask() {
     if (elapsed < 1) return discardTask()
+    const { name, ref } = splitRef(draft.name, draft.ref)
     record(buildTask({
-      name: draft.name, seconds: elapsed, projectId: draft.projectId, billable: draft.billable,
+      name, ref, seconds: elapsed, projectId: draft.projectId, billable: draft.billable,
       tags: parseTags(draft.tags), date: dateKey(), start: active.startTime, note: draft.note, routineId: draft.routineId, projects, clients,
     }))
     // Si venía del backlog, ya está hecha: sale de "por hacer".
     if (draft.planId) removePlan(draft.planId)
     setActive({ base: 0, startedAt: null })
-    setDraft((d) => ({ ...d, name: '', tags: '', note: '', planId: undefined, routineId: undefined }))
+    setDraft((d) => ({ ...d, name: '', tags: '', note: '', ref: undefined, planId: undefined, routineId: undefined }))
     setNoteOpen(false)
+  }
+
+  /** Si en el nombre quedó pegado un Task ID y no hay otro, pasa a ser el ID de la tarea. */
+  function splitRef(name: string, ref?: string) {
+    return !ref?.trim() && looksLikeId(name) ? { name: '', ref: name.trim() } : { name, ref }
+  }
+
+  function copyRef(ref: string) {
+    navigator.clipboard?.writeText(ref).then(() => toast('Task ID copiado', ref), () => {})
   }
 
   function startWith(next: Draft) {
@@ -407,20 +418,20 @@ export default function Page() {
   function openManual() {
     const d = new Date()
     const from = new Date(d.getTime() - 3600000)
-    setManual({ name: '', projectId: draft.projectId, billable: draft.billable, tags: '', note: '', date: dateKey(), from: timeKey(from), to: timeKey(d) })
+    setManual({ name: '', ref: '', projectId: draft.projectId, billable: draft.billable, tags: '', note: '', date: dateKey(), from: timeKey(from), to: timeKey(d) })
     setManualError('')
   }
 
   function editTask(task: Task) {
     const from = task.start ?? '09:00'
-    setManual({ id: task.id, rate: task.rate, routineId: task.routineId, name: task.name, projectId: task.projectId, billable: task.billable, tags: task.tags.join(', '), note: task.note ?? '', date: task.date, from, to: addMinutes(from, Math.round(task.seconds / 60)) })
+    setManual({ id: task.id, rate: task.rate, routineId: task.routineId, ref: task.ref ?? '', name: task.name, projectId: task.projectId, billable: task.billable, tags: task.tags.join(', '), note: task.note ?? '', date: task.date, from, to: addMinutes(from, Math.round(task.seconds / 60)) })
     setManualError('')
   }
 
   function saveManual() {
     if (!manual) return
-    if (!manual.name.trim()) return setManualError('Ponele un nombre a la tarea.')
-    if (!manual.projectId) return setManualError('Elegí un proyecto: de un cliente o personal.')
+    if (!manual.name.trim() && !manual.ref.trim()) return setManualError('Ponele un nombre o un Task ID a la tarea.')
+    if (!manual.projectId) return setManualError('Elegí un proyecto: de una plataforma o personal.')
     const a = minutesOf(manual.from)
     const b = minutesOf(manual.to)
     if (Number.isNaN(a) || Number.isNaN(b)) return setManualError('Completá el horario de inicio y de fin.')
@@ -431,8 +442,9 @@ export default function Page() {
     const old = manual.id ? tasks.find((t) => t.id === manual.id) : undefined
     // Al editar se respeta la tarifa con que se registró, salvo que cambie el proyecto.
     const keepRate = old && old.projectId === manual.projectId ? old.rate : undefined
+    const split = splitRef(manual.name, manual.ref)
     const task = buildTask({
-      id: manual.id, name: manual.name, seconds: minutes * 60, projectId: manual.projectId, billable: manual.billable,
+      id: manual.id, name: split.name, ref: split.ref, seconds: minutes * 60, projectId: manual.projectId, billable: manual.billable,
       tags: parseTags(manual.tags), date: manual.date || dateKey(), start: manual.from, rate: keepRate, note: manual.note, routineId: manual.routineId, projects, clients,
     })
     if (old) setTasks((cur) => cur.map((t) => (t.id === old.id ? task : t)))
@@ -499,7 +511,8 @@ export default function Page() {
 
           <section className={`timer-bar ${running ? 'is-running' : ''}`}>
             <div className="timer-name-wrap">
-              <input className="timer-name" value={draft.name} onChange={(e) => { setDraft({ ...draft, name: e.target.value, planId: undefined, routineId: undefined }); setSuggestOpen(true) }} onFocus={() => setSuggestOpen(true)} onBlur={() => setSuggestOpen(false)} onKeyDown={(e) => { if (e.key === 'Escape') setSuggestOpen(false); if (e.key === 'Enter') { setSuggestOpen(false); if (running) stopTask(); else startTask() } }} maxLength={140} placeholder={['¿En qué estás trabajando?', backlog.length ? `${backlog.length} por hacer` : '', routinesToday.length ? `${routinesToday.length} rutina${routinesToday.length === 1 ? '' : 's'} hoy` : ''].filter(Boolean).join(' · ')} aria-label="Nombre de tarea" autoComplete="off" />
+              {draft.ref && <span className="ref-chip"><button onClick={() => copyRef(draft.ref!)} title={`Task ID ${draft.ref} · tocá para copiar`}><Copy /> {shortRef(draft.ref)}</button><button onClick={() => setDraft({ ...draft, ref: undefined })} aria-label="Quitar Task ID" title="Quitar Task ID"><X /></button></span>}
+              <input className="timer-name" value={draft.name} onChange={(e) => { setDraft({ ...draft, name: e.target.value, planId: undefined, routineId: undefined }); setSuggestOpen(true) }} onPaste={(e) => { const text = e.clipboardData.getData('text'); if (!draft.name.trim() && !draft.ref && looksLikeId(text)) { e.preventDefault(); setDraft({ ...draft, ref: text.trim() }) } }} onFocus={() => setSuggestOpen(true)} onBlur={() => setSuggestOpen(false)} onKeyDown={(e) => { if (e.key === 'Escape') setSuggestOpen(false); if (e.key === 'Enter') { setSuggestOpen(false); if (running) stopTask(); else startTask() } }} maxLength={140} placeholder={draft.ref ? '¿Qué tarea es? (opcional)' : ['¿En qué estás trabajando? Nombre o Task ID', backlog.length ? `${backlog.length} por hacer` : '', routinesToday.length ? `${routinesToday.length} rutina${routinesToday.length === 1 ? '' : 's'} hoy` : ''].filter(Boolean).join(' · ')} aria-label="Nombre de tarea" autoComplete="off" />
               {suggestOpen && !running && (routineMatches.length > 0 || backlogMatches.length > 0 || templates.length > 0) && (
                 // Elegir una sugerencia sólo la carga en la caja: después se arranca con ▶.
                 <div className="suggest-menu" onMouseDown={(e) => e.preventDefault()}>
@@ -521,8 +534,8 @@ export default function Page() {
             <div className="timer-controls">
               <ProjectPicker projects={projects} clients={clients} value={draft.projectId} onChange={pickProject} onCreateProject={(p) => setProjects((cur) => [...cur, p])} openKey={pickerKey} compact />
               <label className="tags-input"><Tag /><input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} placeholder="Etiquetas" aria-label="Etiquetas" /></label>
-              <button className={`billable-toggle ${noteOpen || draft.note.trim() ? 'billable-on' : ''}`} onClick={() => setNoteOpen((o) => !o)} aria-pressed={noteOpen} title={draft.note.trim() ? `Nota: ${draft.note}` : 'Agregar una nota: qué hiciste, para acordarte después'} aria-label="Nota"><StickyNote /></button>
-              {draftCanBill && <button className={`billable-toggle ${draft.billable ? 'billable-on' : ''}`} onClick={() => setDraft({ ...draft, billable: !draft.billable })} aria-pressed={draft.billable} title={draft.billable ? (info.rate > 0 ? `Facturable a ${info.rate} USD/h` : 'Facturable: horas trabajadas para el cliente') : 'No facturable'} aria-label="Facturable"><DollarSign /></button>}
+              <button className={`billable-toggle ${noteOpen || draft.note.trim() ? 'billable-on' : ''}`} onClick={() => setNoteOpen((o) => !o)} aria-pressed={noteOpen} title={draft.note.trim() ? 'Memo de la tarea' : 'Memo: pegá las indicaciones de la tarea o anotá qué hiciste'} aria-label="Memo"><StickyNote /></button>
+              {draftCanBill && <button className={`billable-toggle ${draft.billable ? 'billable-on' : ''}`} onClick={() => setDraft({ ...draft, billable: !draft.billable })} aria-pressed={draft.billable} title={draft.billable ? (info.rate > 0 ? `Facturable a ${info.rate} USD/h` : 'Facturable: horas taskeadas en la plataforma') : 'No facturable'} aria-label="Facturable"><DollarSign /></button>}
               <button className={`billable-toggle ${mode.down ? 'billable-on' : ''}`} onClick={() => setMode((m) => ({ ...m, down: !m.down }))} disabled={running} aria-pressed={mode.down} title={mode.down ? 'Cuenta regresiva: tocá para contar hacia arriba' : 'Contando hacia arriba: tocá para usar cuenta regresiva'} aria-label="Modo del timer">{mode.down ? <ArrowDown /> : <ArrowUp />}</button>
               <span className="timer-clock" aria-live="off">{fmtClock(shown)}</span>
               {!running && draft.name.trim() && !draft.planId && <button className="icon-button" onClick={saveForLater} aria-label="Guardar en el backlog" title="Guardar en el backlog para hacerla después"><ListPlus /></button>}
@@ -530,7 +543,14 @@ export default function Page() {
               {elapsed > 0 && <button className="icon-button" onClick={discardTask} aria-label="Descartar" title="Descartar sin registrar"><X /></button>}
             </div>
           </section>
-          {(noteOpen || draft.note) && <textarea className="timer-note" autoFocus={noteOpen} rows={2} value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') setNoteOpen(false) }} maxLength={2000} placeholder="Nota de la tarea: qué hiciste, decisiones, links, lo que falta…" aria-label="Nota de la tarea" />}
+          {(noteOpen || draft.note || draft.ref) && <div className="memo-panel">
+            <div className="memo-head">
+              <span><StickyNote /> Memo</span>
+              <label className="ref-input">Task ID<input className="mono" value={draft.ref ?? ''} onChange={(e) => setDraft({ ...draft, ref: e.target.value || undefined })} placeholder="Pegalo acá" /></label>
+              {draft.note && <small>{draft.note.length.toLocaleString('es-AR')} caracteres</small>}
+            </div>
+            <AutoTextarea className="memo-text" autoFocus={noteOpen && !draft.note} rows={4} value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') setNoteOpen(false) }} maxLength={20000} placeholder="Pegá las indicaciones de la tarea o anotá qué hiciste, decisiones, lo que falta…" aria-label="Memo de la tarea" />
+          </div>}
           <div className="timer-sub">
             {!running && mode.down && <span className="countdown-presets">Cuenta regresiva: {PRESET_MINUTES.map((m) => <button key={m} className={mode.minutes === m ? 'preset-on' : ''} onClick={() => setMode({ down: true, minutes: m })}>{m} min</button>)}<input type="number" min={1} max={600} value={mode.minutes} onChange={(e) => setMode({ down: true, minutes: Math.min(600, Math.max(1, Math.round(Number(e.target.value)) || 1)) })} aria-label="Minutos" /> min</span>}
             {running && active.target && <span>Cuenta regresiva de {fmtHours(active.target)}: al llegar a cero se registra sola</span>}
@@ -605,11 +625,11 @@ export default function Page() {
         <h2>{manual.id ? 'Editar tarea' : 'Cargar tiempo a mano'}</h2>
         {!manual.id && <p>Sumá una tarea que ya hiciste para no perder ese trabajo.</p>}
         <div className="form-grid">
-          <label>Tarea<input autoFocus placeholder="¿Qué hiciste?" value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} /></label>
+          <div className="modal-fields two"><label>Tarea<input autoFocus placeholder="¿Qué hiciste?" value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} /></label><label>Task ID<input className="mono" placeholder="Opcional" value={manual.ref} onChange={(e) => setManual({ ...manual, ref: e.target.value })} /></label></div>
           <div className="field"><span>Proyecto</span><ProjectPicker projects={projects} clients={clients} value={manual.projectId} onChange={(id) => setManual({ ...manual, projectId: id, billable: defaultBillable(id, projects, clients) })} onCreateProject={(p) => setProjects((cur) => [...cur, p])} /></div>
           <label>Etiquetas<input placeholder="diseño, reunión" value={manual.tags} onChange={(e) => setManual({ ...manual, tags: e.target.value })} /></label>
           <div className="modal-fields three"><label>Fecha<input type="date" value={manual.date} onChange={(e) => setManual({ ...manual, date: e.target.value })} /></label><label>Desde<input type="time" value={manual.from} onChange={(e) => setManual({ ...manual, from: e.target.value })} /></label><label>Hasta<input type="time" value={manual.to} onChange={(e) => setManual({ ...manual, to: e.target.value })} /></label></div>
-          <label>Nota<textarea rows={3} value={manual.note} onChange={(e) => setManual({ ...manual, note: e.target.value })} maxLength={2000} placeholder="Qué hiciste, decisiones, links, lo que quedó pendiente…" /></label>
+          <label>Memo<AutoTextarea className="memo-text" rows={4} max={360} value={manual.note} onChange={(e) => setManual({ ...manual, note: e.target.value })} maxLength={20000} placeholder="Indicaciones de la tarea, qué hiciste, lo que quedó pendiente…" /></label>
           {canBill(manual.projectId, projects) ? <label className="check-line"><input type="checkbox" checked={manual.billable} onChange={(e) => setManual({ ...manual, billable: e.target.checked })} /> Facturable{manual.billable && (manualRate > 0 ? ` · ${manualRate} USD/h` : ' · sin tarifa por hora')}</label> : <small className="field-help">Proyecto personal: suma tiempo, no se factura.</small>}
         </div>
         {manualError && <p className="form-error">{manualError}</p>}

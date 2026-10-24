@@ -7,7 +7,7 @@ import { GoalPanel } from './goal-panel'
 import { PERIODS, buildEntries, computeStats, groupEntries, type Bin, type GroupBy, type Period } from '@/lib/stats'
 
 const GROUPS: { id: GroupBy; label: string }[] = [
-  { id: 'cliente', label: 'Cliente' },
+  { id: 'cliente', label: 'Plataforma' },
   { id: 'proyecto', label: 'Proyecto' },
   { id: 'etiqueta', label: 'Etiqueta' },
   { id: 'tarea', label: 'Tarea' },
@@ -91,7 +91,7 @@ export function StatsView({ tasks, payments, projects, clients, goal, setGoal, t
   return (
     <section className="view">
       <div className="view-heading">
-        <div><h2>Estadísticas</h2><p className="view-sub">Tiempo y plata por día, mes, cliente y proyecto. Los cobros de proyectos con presupuesto se suman en la fecha en que los cobraste.</p></div>
+        <div><h2>Estadísticas</h2><p className="view-sub">Tiempo y plata por día, mes, plataforma y proyecto. Los cobros de proyectos con presupuesto se suman en la fecha en que los cobraste.</p></div>
       </div>
 
       <GoalPanel goal={goal} setGoal={setGoal} tasks={tasks} payments={payments} today={today} />
@@ -106,7 +106,7 @@ export function StatsView({ tasks, payments, projects, clients, goal, setGoal, t
           <button onClick={() => setOffset((o) => o + 1)} disabled={period === 'todo' || offset >= 0} aria-label="Período siguiente"><ChevronRight /></button>
         </div>
         <div className="filters">
-          <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} aria-label="Filtrar por cliente"><option value="">Todos los clientes</option>{clientNames.map((n) => <option key={n} value={n}>{n}</option>)}</select>
+          <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} aria-label="Filtrar por plataforma"><option value="">Todas las plataformas</option>{clientNames.map((n) => <option key={n} value={n}>{n}</option>)}</select>
           <button className={`chip ${billableOnly ? 'chip-on' : ''}`} onClick={() => setBillableOnly((b) => !b)} aria-pressed={billableOnly}>Sólo facturable</button>
         </div>
       </div>

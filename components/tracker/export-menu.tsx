@@ -45,7 +45,7 @@ export function ExportMenu({ tasks, title, label = 'Exportar' }: Props) {
           <p className="picker-group">{tasks.length} tarea{tasks.length === 1 ? '' : 's'}, con sus notas</p>
           <button role="menuitem" onClick={copy}>{copied ? <Check /> : <ClipboardCopy />}<span><b>{copied ? 'Copiado' : 'Copiar para una IA'}</b><small>Texto listo para pegar y pedir que analice tus patrones</small></span></button>
           <button role="menuitem" onClick={() => { download(`${name}.md`, md(), 'text/markdown;charset=utf-8'); setOpen(false) }}><FileText /><span><b>Markdown (.md)</b><small>Por día, con proyecto, montos y notas</small></span></button>
-          <button role="menuitem" onClick={() => { download(`${name}-cliente.md`, md(true), 'text/markdown;charset=utf-8'); setOpen(false) }}><UserRound /><span><b>Reporte para el cliente</b><small>Qué hiciste y cuánto tiempo, sin montos</small></span></button>
+          <button role="menuitem" onClick={() => { download(`${name}-reporte.md`, md(true), 'text/markdown;charset=utf-8'); setOpen(false) }}><UserRound /><span><b>Reporte para compartir</b><small>Qué hiciste y cuánto tiempo, sin montos</small></span></button>
           <button role="menuitem" onClick={() => { download(`${name}.csv`, tasksToCsv(tasks), 'text/csv;charset=utf-8'); setOpen(false) }}><FileSpreadsheet /><span><b>Planilla (.csv)</b><small>Para Excel o Google Sheets</small></span></button>
         </div>
       )}

@@ -1,34 +1,39 @@
 export type Link = { label: string; url: string }
 
 /**
- * Embudo de una plataforma o cliente: prospecto → aplicado → onboarding → activo.
- * 'potencial' es el nombre viejo de prospecto: se sigue leyendo, ver clientStatus().
+ * Embudo de búsqueda de trabajo en una plataforma, más el estado una vez adentro.
+ * Búsqueda: en vista → aplicado → evaluación → onboarding. Adentro: activo ⇄ en pausa. Salidas: rechazado, finalizado.
+ * 'prospecto' / 'potencial' / 'cerrado' son nombres de versiones anteriores: ver clientStatus().
  */
-export type ClientStatus = 'prospecto' | 'aplicado' | 'onboarding' | 'activo' | 'pausado' | 'cerrado' | 'potencial'
+export type ClientStatus = 'vista' | 'aplicado' | 'evaluacion' | 'onboarding' | 'activo' | 'pausado' | 'rechazado' | 'finalizado' | 'prospecto' | 'potencial' | 'cerrado'
+export type Stage = Exclude<ClientStatus, 'prospecto' | 'potencial' | 'cerrado'>
 
-export const CLIENT_STATUSES: { id: Exclude<ClientStatus, 'potencial'>; label: string; help: string }[] = [
-  { id: 'prospecto', label: 'Prospecto', help: 'Lo estás mirando o buscando' },
-  { id: 'aplicado', label: 'Aplicado', help: 'Mandaste la postulación, esperás respuesta' },
-  { id: 'onboarding', label: 'Onboarding', help: 'Te aceptaron: cursos, evaluaciones, cuenta por activar' },
-  { id: 'activo', label: 'Activo', help: 'Hay trabajo y estás cobrando' },
-  { id: 'pausado', label: 'En pausa', help: 'Sin tareas por ahora, puede volver' },
-  { id: 'cerrado', label: 'Cerrado', help: 'Ya no trabajás ahí' },
+export const STAGE_GROUPS: { id: string; label: string; stages: Stage[] }[] = [
+  { id: 'busqueda', label: 'Búsqueda', stages: ['vista', 'aplicado', 'evaluacion', 'onboarding'] },
+  { id: 'adentro', label: 'Adentro', stages: ['activo', 'pausado'] },
+  { id: 'salida', label: 'Cerradas', stages: ['rechazado', 'finalizado'] },
 ]
 
-export function clientStatus(c: { status?: ClientStatus } | null | undefined): Exclude<ClientStatus, 'potencial'> {
+export const CLIENT_STATUSES: { id: Stage; label: string; help: string }[] = [
+  { id: 'vista', label: 'En vista', help: 'La viste o te la recomendaron; todavía no aplicaste' },
+  { id: 'aplicado', label: 'Aplicado', help: 'Te registraste o mandaste la postulación; esperás respuesta' },
+  { id: 'evaluacion', label: 'Evaluación', help: 'Entrevista, test de habilidades o assessment' },
+  { id: 'onboarding', label: 'Onboarding', help: 'Te aceptaron: cursos, verificación de identidad, contrato, cuenta por activar' },
+  { id: 'activo', label: 'Activo', help: 'Hay tareas y estás taskeando' },
+  { id: 'pausado', label: 'En pausa', help: 'Adentro, pero sin taskear: no hay tareas o frenaste vos' },
+  { id: 'rechazado', label: 'Rechazado', help: 'No pasaste la evaluación o no respondieron' },
+  { id: 'finalizado', label: 'Finalizado', help: 'Trabajaste ahí y terminó: proyecto cerrado, cuenta dada de baja o lo dejaste' },
+]
+
+export function clientStatus(c: { status?: ClientStatus } | null | undefined): Stage {
   const s = c?.status ?? 'activo'
-  return s === 'potencial' ? 'prospecto' : s
+  return s === 'potencial' || s === 'prospecto' ? 'vista' : s === 'cerrado' ? 'finalizado' : s
 }
 
-export type Client = { id: string; name: string; color: string; links?: Link[]; notes?: string; status?: ClientStatus; contact?: string; email?: string; since?: string }
+/** Días sin taskear a partir de los que una plataforma activa se sugiere como en pausa. */
+export const IDLE_DAYS = 14
 
-/** Plataformas de trabajo gig frecuentes: atajo al crear un cliente. */
-export const PLATFORM_PRESETS: { name: string; url: string; status: ClientStatus }[] = [
-  { name: 'Outlier', url: 'app.outlier.ai', status: 'activo' },
-  { name: 'LinkedIn', url: 'linkedin.com/jobs', status: 'prospecto' },
-  { name: 'Upwork', url: 'upwork.com', status: 'prospecto' },
-  { name: 'Meridial', url: 'meridial.ai', status: 'onboarding' },
-]
+export type Client = { id: string; name: string; color: string; links?: Link[]; notes?: string; status?: ClientStatus; contact?: string; email?: string; since?: string }
 
 export type LinkKind = 'slack' | 'meet' | 'doc' | 'manual' | 'pago' | 'plataforma' | 'otro'
 
@@ -87,7 +92,8 @@ export type Task = {
   date: string // AAAA-MM-DD, hora local
   start?: string // HH:MM
   long: boolean
-  note?: string // memo: qué se hizo, para acordarse, exportar o mostrarle al cliente
+  note?: string // memo: indicaciones de la tarea, qué se hizo, para acordarse o exportar
+  ref?: string // Task ID de la plataforma (ej. el UUID de Outlier)
   routineId?: string // si salió de una rutina, para saber que ya se hizo hoy
 }
 
@@ -182,6 +188,16 @@ export function fmtShort(n: number) {
   return n.toLocaleString('es-AR', { maximumFractionDigits: Number.isInteger(n) ? 0 : 2 })
 }
 
+/** Un Task ID pegado: UUID, hash o código largo sin espacios y con números. */
+export function looksLikeId(text: string) {
+  const t = text.trim()
+  return t.length >= 8 && t.length <= 80 && !/\s/.test(t) && /\d/.test(t) && /^[\w-]+$/.test(t)
+}
+
+export function shortRef(ref: string) {
+  return ref.length > 10 ? `${ref.slice(0, 8)}…` : ref
+}
+
 export function parseTags(text: string) {
   return [...new Set(text.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean))]
 }
@@ -239,6 +255,7 @@ export function buildTask(input: {
   start?: string
   rate?: number // para respetar la tarifa congelada al editar
   note?: string
+  ref?: string
   routineId?: string
   projects: Project[]
   clients: Client[]
@@ -248,9 +265,10 @@ export function buildTask(input: {
   const billable = input.billable && canBill(input.projectId, input.projects)
   const amount = billable && rate > 0 ? goldFor(input.seconds, rate) : 0
   const note = input.note?.trim()
+  const ref = input.ref?.trim()
   return {
     id: input.id ?? Date.now() + Math.floor(Math.random() * 1000),
-    name: input.name.trim() || 'Tarea sin título',
+    name: input.name.trim() || (ref ? `Task ${shortRef(ref)}` : 'Tarea sin título'),
     client: info.clientName,
     project: info.projectName,
     projectId: info.project?.id ?? null,
@@ -265,6 +283,7 @@ export function buildTask(input: {
     start: input.start,
     long: false,
     ...(note ? { note } : {}),
+    ...(ref ? { ref } : {}),
     ...(input.routineId ? { routineId: input.routineId } : {}),
   }
 }

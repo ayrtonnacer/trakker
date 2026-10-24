@@ -197,7 +197,7 @@ export function useGitSync({ loaded, data, apply }: { loaded: boolean; data: App
     set('connecting')
     try {
       const info = await checkRepo(clean)
-      if (!info.isPrivate && !window.confirm(`“${info.name}” es un repo PÚBLICO: cualquiera podría ver tus ingresos, clientes y pagos.\n\n¿Conectar igual?`)) {
+      if (!info.isPrivate && !window.confirm(`“${info.name}” es un repo PÚBLICO: cualquiera podría ver tus ingresos, plataformas y pagos.\n\n¿Conectar igual?`)) {
         throw new Error('Conexión cancelada: elegí un repo privado.')
       }
     } catch (e) {
