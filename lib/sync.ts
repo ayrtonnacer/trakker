@@ -2,7 +2,7 @@
 // Cada archivo tiene una tabla legible y, al final, un bloque <!-- trakker:data --> con
 // el dato exacto: ese bloque es la fuente de verdad al leer. Editar la tabla a mano no
 // cambia nada; para corregir algo, usá la app (o editá el bloque de datos).
-import { fmtClock, fmtMoney, type Client, type Goal, type Payment, type PlanItem, type Project, type Routine, type Task } from './game'
+import { clientStatus, fmtClock, fmtMoney, type Client, type Goal, type Payment, type PlanItem, type Project, type Routine, type Task } from './game'
 
 export type AppData = { tasks: Task[]; clients: Client[]; projects: Project[]; payments: Payment[]; goal: Goal | null; plan: PlanItem[]; routines: Routine[] }
 export type SyncConfig = { repo: string; branch: string; dir: string; token: string }
@@ -71,10 +71,10 @@ function clientsFile(d: AppData) {
     return b === 'hora' ? `por hora · US$ ${p.rate}/h` : b === 'fijo' ? `precio fijo · US$ ${p.price ?? 0}` : b === 'entrega' ? `por entrega · US$ ${p.rate}` : 'interno'
   }
   const section = (title: string, projects: Project[], c?: Client) => {
-    out.push(`## ${title}${c ? ` (${c.status ?? 'activo'})` : ''}`, '')
+    out.push(`## ${title}${c ? ` (${clientStatus(c)})` : ''}`, '')
     if (c?.links?.length) out.push(`Links: ${c.links.map((l) => `[${l.label}](${l.url})`).join(' · ')}`, '')
     if (c?.notes) out.push(c.notes.split('\n').map((l) => `> ${l}`).join('\n'), '')
-    if (projects.length) out.push(...projects.map((p) => `- **${p.name}** — ${billing(p)}`), '')
+    if (projects.length) out.push(...projects.map((p) => `- **${p.name}** — ${billing(p)}${p.links?.length ? ` — ${p.links.map((l) => `[${l.label}](${l.url})`).join(' · ')}` : ''}`), '')
   }
   d.clients.forEach((c) => section(c.name, d.projects.filter((p) => p.clientId === c.id), c))
   const loose = d.projects.filter((p) => !p.clientId || !d.clients.some((c) => c.id === p.clientId))

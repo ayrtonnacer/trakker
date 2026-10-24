@@ -1,8 +1,57 @@
 export type Link = { label: string; url: string }
 
-export type ClientStatus = 'activo' | 'potencial' | 'pausado'
+/**
+ * Embudo de una plataforma o cliente: prospecto → aplicado → onboarding → activo.
+ * 'potencial' es el nombre viejo de prospecto: se sigue leyendo, ver clientStatus().
+ */
+export type ClientStatus = 'prospecto' | 'aplicado' | 'onboarding' | 'activo' | 'pausado' | 'cerrado' | 'potencial'
+
+export const CLIENT_STATUSES: { id: Exclude<ClientStatus, 'potencial'>; label: string; help: string }[] = [
+  { id: 'prospecto', label: 'Prospecto', help: 'Lo estás mirando o buscando' },
+  { id: 'aplicado', label: 'Aplicado', help: 'Mandaste la postulación, esperás respuesta' },
+  { id: 'onboarding', label: 'Onboarding', help: 'Te aceptaron: cursos, evaluaciones, cuenta por activar' },
+  { id: 'activo', label: 'Activo', help: 'Hay trabajo y estás cobrando' },
+  { id: 'pausado', label: 'En pausa', help: 'Sin tareas por ahora, puede volver' },
+  { id: 'cerrado', label: 'Cerrado', help: 'Ya no trabajás ahí' },
+]
+
+export function clientStatus(c: { status?: ClientStatus } | null | undefined): Exclude<ClientStatus, 'potencial'> {
+  const s = c?.status ?? 'activo'
+  return s === 'potencial' ? 'prospecto' : s
+}
 
 export type Client = { id: string; name: string; color: string; links?: Link[]; notes?: string; status?: ClientStatus; contact?: string; email?: string; since?: string }
+
+/** Plataformas de trabajo gig frecuentes: atajo al crear un cliente. */
+export const PLATFORM_PRESETS: { name: string; url: string; status: ClientStatus }[] = [
+  { name: 'Outlier', url: 'app.outlier.ai', status: 'activo' },
+  { name: 'LinkedIn', url: 'linkedin.com/jobs', status: 'prospecto' },
+  { name: 'Upwork', url: 'upwork.com', status: 'prospecto' },
+  { name: 'Meridial', url: 'meridial.ai', status: 'onboarding' },
+]
+
+export type LinkKind = 'slack' | 'meet' | 'doc' | 'manual' | 'pago' | 'plataforma' | 'otro'
+
+export const LINK_KIND_LABEL: Record<LinkKind, string> = {
+  slack: 'Slack', meet: 'Reunión', doc: 'Documento', manual: 'Manual', pago: 'Pagos', plataforma: 'Plataforma', otro: 'Link',
+}
+
+/** Adivina qué es un link por la URL o el nombre, para mostrarlo con su ícono sin pedirle nada al usuario. */
+export function linkKind(l: Link): LinkKind {
+  const text = `${l.label} ${l.url}`.toLowerCase()
+  if (/slack\.com|\bslack\b/.test(text)) return 'slack'
+  if (/meet\.google|zoom\.us|teams\.microsoft|teams\.live|whereby|\bmeet\b|reuni[oó]n|\bzoom\b/.test(text)) return 'meet'
+  if (/manual|gu[ií]a|guideline|instruc|handbook|playbook|\bsop\b/.test(text)) return 'manual'
+  if (/earnings|payments?|pagos?|invoice|factura|payout|cobros?/.test(text)) return 'pago'
+  if (/docs\.google|drive\.google|notion\.|dropbox|\.pdf|confluence|airtable|sheets\.google|\bdoc\b|documento/.test(text)) return 'doc'
+  return /platform|plataforma|app\.|dashboard/.test(text) ? 'plataforma' : 'otro'
+}
+
+/** Links a mano para un proyecto: los suyos primero y después los de su cliente/plataforma, sin repetir. */
+export function resourceLinks(project: Project | null | undefined, client: Client | null | undefined): Link[] {
+  const seen = new Set<string>()
+  return [...(project?.links ?? []), ...(client?.links ?? [])].filter((l) => (seen.has(l.url) ? false : (seen.add(l.url), true)))
+}
 
 /**
  * Cómo se cobra un proyecto:
@@ -17,7 +66,7 @@ export type Billing = 'hora' | 'fijo' | 'entrega' | 'interno'
 export type ProjectStatus = 'activo' | 'pausado' | 'terminado'
 
 /** Proyecto. clientId null = sin cliente. rate = USD/h (hora) o USD por entrega (entrega). price = total (fijo). */
-export type Project = { id: string; name: string; clientId: string | null; rate: number; color: string; billing?: Billing; price?: number; status?: ProjectStatus }
+export type Project = { id: string; name: string; clientId: string | null; rate: number; color: string; billing?: Billing; price?: number; status?: ProjectStatus; links?: Link[] }
 
 /** Plata cobrada (o por cobrar) que no sale de las horas: adelantos, hitos, entregas. */
 export type Payment = { id: string; projectId: string | null; label: string; amount: number; date: string; paid: boolean }
