@@ -88,7 +88,7 @@ export function ProjectPicker({ projects, clients, value, onChange, onCreateProj
         <div className="picker-pop" role="listbox">
           {!creating ? (
             <>
-              <div className="picker-search"><Search /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar proyecto o cliente" aria-label="Buscar proyecto o cliente" /></div>
+              <div className="picker-search"><Search /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar proyecto o plataforma" aria-label="Buscar proyecto o plataforma" /></div>
               <div className="picker-list">
                 {groups.map((g) => (
                   <div key={g.id || 'none'}>
@@ -102,7 +102,7 @@ export function ProjectPicker({ projects, clients, value, onChange, onCreateProj
                     ))}
                   </div>
                 ))}
-                {groups.length === 0 && <p className="picker-empty">{q ? `No hay proyectos con “${query}”.` : 'Todavía no hay proyectos. Creá uno: de un cliente o personal.'}</p>}
+                {groups.length === 0 && <p className="picker-empty">{q ? `No hay proyectos con “${query}”.` : 'Todavía no hay proyectos. Creá uno: de una plataforma o personal.'}</p>}
               </div>
               <button type="button" className="picker-create" onClick={() => { setCreating(true); setDraft((d) => ({ ...d, name: query })) }}><Plus /> Crear proyecto nuevo</button>
             </>
@@ -110,7 +110,7 @@ export function ProjectPicker({ projects, clients, value, onChange, onCreateProj
             <div className="picker-form">
               <p className="picker-group">{draft.clientId ? 'Nuevo proyecto por hora' : 'Nuevo proyecto personal'}</p>
               <input autoFocus placeholder="Nombre del proyecto" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && create()} />
-              <select value={draft.clientId} onChange={(e) => setDraft({ ...draft, clientId: e.target.value })} aria-label="Cliente">
+              <select value={draft.clientId} onChange={(e) => setDraft({ ...draft, clientId: e.target.value })} aria-label="Plataforma">
                 <option value="">{PERSONAL}</option>
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>

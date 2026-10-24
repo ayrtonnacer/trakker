@@ -1,7 +1,7 @@
 'use client'
 
 import { DollarSign, Pencil, Play, StickyNote, Trash2 } from 'lucide-react'
-import { fmtClock, fmtMoney, type Task } from '@/lib/game'
+import { fmtClock, fmtMoney, shortRef, type Task } from '@/lib/game'
 
 type Props = {
   task: Task
@@ -21,7 +21,7 @@ export function TaskRow({ task, dateLabel, onDelete, onRepeat, onEdit, onToggleB
     <div className={`task-row ${selected ? 'row-selected' : ''}`}>
       {onSelect && <input type="checkbox" className="row-check" checked={!!selected} onChange={() => {}} onClick={(e) => onSelect(task.id, e.shiftKey)} aria-label={`Seleccionar “${task.name}”`} />}
       <button className="task-info" onClick={() => onEdit(task)} title="Editar">
-        <strong>{task.name}</strong>
+        <strong>{task.name}{task.ref && <code className="ref-tag" title={`Task ID ${task.ref}`}>#{shortRef(task.ref)}</code>}</strong>
         <span><i className="dot" style={{ background: task.color }} /> {task.project}{task.client !== 'Sin cliente' && <> · {task.client}</>}</span>
         {task.note && <em className="task-note" title={task.note}><StickyNote /> {task.note}</em>}
       </button>

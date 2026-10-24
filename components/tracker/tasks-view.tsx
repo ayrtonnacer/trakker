@@ -103,7 +103,7 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
       (!projectId || t.projectId === projectId) &&
       // Las tareas sin proyecto cuentan como personales.
       (!clientProjects || (t.projectId ? clientProjects.has(t.projectId) : clientId === 'personal')) &&
-      (!q || t.name.toLowerCase().includes(q) || t.project.toLowerCase().includes(q) || t.client.toLowerCase().includes(q) || t.tags.some((tag) => tag.includes(q))))
+      (!q || t.name.toLowerCase().includes(q) || (t.ref ?? '').toLowerCase().includes(q) || t.project.toLowerCase().includes(q) || t.client.toLowerCase().includes(q) || t.tags.some((tag) => tag.includes(q))))
   }, [tasks, q, fromKey, toKey, projectId, clientId, projects, clients])
   const filtering = !!(q || range !== 'todo' || projectId || clientId)
   const totalSeconds = visible.reduce((s, t) => s + t.seconds, 0)
@@ -153,7 +153,7 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
     if (!routineDraft) return
     const text = routineDraft.text.trim()
     if (!text) return setRoutineError('Ponele un nombre a la rutina.')
-    if (!routineDraft.projectId) return setRoutineError('Elegí un proyecto: de un cliente o personal.')
+    if (!routineDraft.projectId) return setRoutineError('Elegí un proyecto: de una plataforma o personal.')
     if (!routineDraft.days.length) return setRoutineError('Elegí al menos un día.')
     const data = { text, projectId: routineDraft.projectId, days: [...routineDraft.days].sort(), tags: parseTags(routineDraft.tags) }
     if (routineDraft.id) setRoutines((cur) => cur.map((x) => (x.id === routineDraft.id ? { ...x, ...data } : x)))
@@ -258,12 +258,12 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
 
       <div className="list-toolbar">
         <label className="check-all"><input type="checkbox" checked={allVisibleSelected} onChange={() => toggleMany(ordered)} disabled={ordered.length === 0} /> Seleccionar todo</label>
-        <label className="search-input"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar tarea, proyecto, cliente o etiqueta" aria-label="Buscar" /></label>
+        <label className="search-input"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar tarea, Task ID, proyecto, plataforma o etiqueta" aria-label="Buscar" /></label>
       </div>
       <div className="task-filters">
         <div className="segmented small" role="tablist" aria-label="Fechas">{RANGES.map((r) => <button key={r.id} role="tab" aria-selected={range === r.id} className={range === r.id ? 'seg-on' : ''} onClick={() => setRange(r.id)}>{r.label}</button>)}</div>
         {range === 'rango' && <span className="date-range"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Desde" /> – <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Hasta" /></span>}
-        <select value={clientId} onChange={(e) => { setClientId(e.target.value); setProjectId('') }} aria-label="Filtrar por cliente"><option value="">Todos los clientes</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}<option value="personal">{PERSONAL}</option></select>
+        <select value={clientId} onChange={(e) => { setClientId(e.target.value); setProjectId('') }} aria-label="Filtrar por plataforma"><option value="">Todas las plataformas</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}<option value="personal">{PERSONAL}</option></select>
         <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Filtrar por proyecto"><option value="">Todos los proyectos</option>{projectOptions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
         {filtering && <button className="text-button" onClick={() => { setQuery(''); setRange('todo'); setProjectId(''); setClientId('') }}><X /> Limpiar</button>}
       </div>
@@ -306,7 +306,7 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
             <div className="form-grid">
               <label>Tarea<input autoFocus value={planDraft.text} onChange={(e) => setPlanDraft({ ...planDraft, text: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && savePlan()} maxLength={140} /></label>
               <div className="field"><span>Proyecto</span><ProjectPicker projects={projects} clients={clients} value={planDraft.projectId} onChange={(id) => setPlanDraft({ ...planDraft, projectId: id })} onCreateProject={onCreateProject} /></div>
-              <label>Nota<textarea rows={3} value={planDraft.note} onChange={(e) => setPlanDraft({ ...planDraft, note: e.target.value })} maxLength={2000} placeholder="Qué hay que hacer, links, detalles…" /></label>
+              <label>Nota<textarea rows={3} value={planDraft.note} onChange={(e) => setPlanDraft({ ...planDraft, note: e.target.value })} maxLength={20000} placeholder="Qué hay que hacer, links, detalles…" /></label>
             </div>
             {planError && <p className="form-error">{planError}</p>}
             <div className="modal-actions">

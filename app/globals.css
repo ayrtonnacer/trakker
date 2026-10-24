@@ -345,9 +345,34 @@ a { color: inherit; }
 .status-onboarding { color: #d9730d; background: rgba(217,115,13,.14); }
 .status-cerrado { color: var(--faint); background: var(--soft); text-decoration: line-through; }
 .project-links { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 8px 34px; }
-.presets { display: flex; flex-wrap: wrap; gap: 6px; }
-.preset-chip { border: 1px dashed var(--line-strong); border-radius: 5px; padding: 3px 9px; color: var(--muted); background: none; font-size: 12px; }
-.preset-chip:hover { color: var(--text); background: var(--hover); }
+.status-vista { color: #2f6f9f; background: rgba(47,111,159,.12); }
+.status-evaluacion { color: #cb912f; background: rgba(203,145,47,.14); }
+.status-rechazado { color: #d44c47; background: rgba(212,76,71,.12); }
+.status-finalizado { color: var(--faint); background: var(--soft); }
+.idle-hint { color: #d9730d; }
+.funnel-filter { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 14px; }
+.funnel-filter > button, .funnel-group button { border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; color: var(--muted); background: var(--surface); font-size: 12px; }
+.funnel-filter button:hover { background: var(--hover); }
+.funnel-filter button.seg-on { border-color: var(--line-strong); color: var(--strong); background: var(--soft); }
+.funnel-filter small { color: var(--faint); }
+.funnel-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.funnel-group > span { flex-basis: 100%; color: var(--faint); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.ref-chip { display: inline-flex; flex: 0 0 auto; align-self: center; align-items: center; margin-right: 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--soft); }
+.ref-chip button { display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 3px 6px; color: var(--text); background: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.ref-chip button + button { padding: 3px 4px; color: var(--faint); }
+.ref-chip svg { width: 12px; height: 12px; }
+.ref-tag { margin-left: 6px; border-radius: 4px; padding: 0 4px; color: var(--muted); background: var(--soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 400; }
+.memo-panel { margin-top: 8px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+.memo-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; border-bottom: 1px solid var(--line); padding: 7px 12px; color: var(--muted); font-size: 12px; }
+.memo-head > span { display: inline-flex; align-items: center; gap: 5px; color: var(--strong); font-weight: 600; }
+.memo-head svg { width: 13px; height: 13px; }
+.memo-head small { margin-left: auto; color: var(--faint); }
+.ref-input { display: inline-flex; align-items: center; gap: 6px; }
+.ref-input input { width: 300px; max-width: 52vw; border: 1px solid var(--line); border-radius: 5px; padding: 3px 7px; color: var(--text); background: var(--soft); }
+.memo-text { display: block; width: 100%; resize: none; border: 0; border-radius: 0 0 10px 10px; padding: 10px 12px; color: var(--text); background: none; font: inherit; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+.memo-text:focus { outline: none; }
+.form-grid .memo-text { border: 1px solid var(--line-strong); border-radius: 6px; }
 .status-pausado { color: var(--muted); background: var(--soft); }
 .client-extra { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 14px 12px 70px; }
 .client-notes { width: 100%; margin: 2px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
