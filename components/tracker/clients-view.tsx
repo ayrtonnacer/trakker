@@ -65,6 +65,14 @@ const BILLING_HELP: Record<Billing, string> = {
   interno: '',
 }
 
+/** Las plataformas no tienen tarifa propia: cada proyecto por hora tiene la suya. Acá se resume el rango. */
+function rateRange(projects: Project[]) {
+  const rates = projects.filter((p) => billingOf(p) === 'hora' && p.rate > 0 && (p.status ?? 'activo') === 'activo').map((p) => p.rate)
+  if (!rates.length) return null
+  const lo = Math.min(...rates), hi = Math.max(...rates)
+  return <> · <b>{lo === hi ? fmtShort(lo) : `${fmtShort(lo)}–${fmtShort(hi)}`} US$/h</b></>
+}
+
 function hostOf(url: string) {
   try {
     return new URL(normalizeUrl(url)).hostname.replace(/^www\./, '')
@@ -354,7 +362,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
                     <i className="client-avatar" style={{ color: client.color }}>{client.name.slice(0, 1).toUpperCase()}</i>
                     <div className="client-title">
                       <strong>{client.name}<span className={`status-pill status-${status}`}>{STATUSES.find((s) => s.id === status)!.label}</span></strong>
-                      <span>{items.length} proyecto{items.length === 1 ? '' : 's'}{projectStatus ? ` ${PROJECT_STATUSES.find((x) => x.id === projectStatus)!.label.toLowerCase()}${items.length === 1 ? '' : 's'}` : ''} · {fmtHours(tot.seconds)} · US$ {fmtMoney(tot.amount)}{tot.seconds >= 900 && tot.amount > 0 && <> · <b>{fmtShort(Math.round((tot.amount / (tot.seconds / 3600)) * 100) / 100)} US$/h</b> reales</>}</span>
+                      <span>{items.length} proyecto{items.length === 1 ? '' : 's'}{projectStatus ? ` ${PROJECT_STATUSES.find((x) => x.id === projectStatus)!.label.toLowerCase()}${items.length === 1 ? '' : 's'}` : ''} · {fmtHours(tot.seconds)} · US$ {fmtMoney(tot.amount)}{rateRange(items)}</span>
                     </div>
                   </button>
                 ) : <>
