@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, Copy, DollarSign, Flame, History, Home, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Repeat, Square, StickyNote, Tag, Users, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, Copy, DollarSign, Flame, History, Home, Landmark, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Repeat, Square, StickyNote, Tag, Users, X } from 'lucide-react'
 import {
   buildTask,
   canBill,
@@ -35,6 +35,7 @@ import {
   type Task,
 } from '@/lib/game'
 import { ClientsView } from '@/components/tracker/clients-view'
+import { PaymentsView } from '@/components/tracker/payments-view'
 import { LinkChip } from '@/components/tracker/link-chip'
 import { AutoTextarea } from '@/components/tracker/memo'
 import { ProjectPicker } from '@/components/tracker/project-picker'
@@ -55,6 +56,7 @@ const TABS: { id: string; icon: typeof Home }[] = [
   { id: 'Inicio', icon: Home },
   { id: 'Tareas', icon: ListChecks },
   { id: 'Plataformas', icon: Users },
+  { id: 'Pagos', icon: Landmark },
   { id: 'Estadísticas', icon: BarChart3 },
 ]
 
@@ -506,6 +508,8 @@ export default function Page() {
   const nextStep = [...steps, stats.monthTarget].find((m) => m > monthLive) ?? 0
   const monthName = today ? MONTHS[Number(today.slice(5, 7)) - 1] : ''
 
+  const backupNag = loaded && sync.status === 'off' && (tasks.length > 0 || payments.length > 0) && backupAgeDays(lastBackup) >= BACKUP_REMINDER_DAYS
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -515,14 +519,14 @@ export default function Page() {
         </nav>
         <div className="header-actions">
           {running && activeTab !== 'Inicio' && <button className="running-pill" onClick={() => setActiveTab('Inicio')}><i /> {fmtClock(shown)}</button>}
-          <button className={`sync-button sync-${sync.status}`} onClick={() => setSyncOpen(true)} title={STATUS_LABEL[sync.status]} aria-label={STATUS_LABEL[sync.status]}>{sync.status === 'off' ? <CloudOff /> : <Cloud />}<span>{sync.status === 'off' ? 'Guardar en GitHub' : STATUS_LABEL[sync.status]}</span></button>
-          <div className="avatar" title="Ayrton">AN</div>
+          {/* Sin GitHub y con el aviso de backup a la vista, el aviso ya ofrece conectarlo: no se repite acá. */}
+          {!backupNag && <button className={`sync-button sync-${sync.status}`} onClick={() => setSyncOpen(true)} title={sync.status === 'off' ? 'Backup y guardado en GitHub' : STATUS_LABEL[sync.status]} aria-label={sync.status === 'off' ? 'Backup y guardado en GitHub' : STATUS_LABEL[sync.status]}>{sync.status === 'off' ? <CloudOff /> : <Cloud />}{sync.status !== 'off' && <span>{STATUS_LABEL[sync.status]}</span>}</button>}
         </div>
       </header>
 
       <div className="content-wrap">
         {activeTab === 'Inicio' && <>
-          {loaded && sync.status === 'off' && (tasks.length > 0 || payments.length > 0) && backupAgeDays(lastBackup) >= BACKUP_REMINDER_DAYS && (
+          {backupNag && (
             <div className="backup-reminder" role="status"><span><b>Tus datos viven solo en este navegador.</b> {lastBackup ? `Hace ${backupAgeDays(lastBackup)} días que no hacés un backup.` : 'Todavía no hiciste ningún backup.'}</span><button className="ghost-button" onClick={() => { downloadBackup(data); markBackup(); setLastBackup(Date.now()) }}>Descargar backup</button><button className="text-button" onClick={() => setSyncOpen(true)}>Guardar en GitHub</button></div>
           )}
           <section className="welcome-row"><p className="eyebrow">{headerDate}</p><h1>Hola, Ayrton</h1></section>
@@ -635,6 +639,7 @@ export default function Page() {
 
         {activeTab === 'Tareas' && <TasksView tasks={tasks} backlog={backlog} routines={routines} setRoutines={setRoutines} onStartRoutine={startRoutine} onCreateProject={(p) => setProjects((cur) => [...cur, p])} projects={projects} clients={clients} onStartPlan={startPlanItem} onRemovePlan={removePlan} onUpdatePlan={(item) => setPlan((cur) => cur.map((x) => (x.id === item.id ? item : x)))} today={today} onDelete={deleteTask} onDeleteMany={deleteMany} onSetBillable={setBillable} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} onAddManual={openManual} />}
         {activeTab === 'Estadísticas' && today && <StatsView tasks={tasks} payments={payments} projects={projects} clients={clients} goal={goal} setGoal={setGoal} today={today} />}
+        {activeTab === 'Pagos' && today && <PaymentsView clients={clients} projects={projects} payments={payments} setPayments={setPayments} today={today} />}
         {activeTab === 'Plataformas' && <ClientsView clients={clients} projects={projects} tasks={tasks} payments={payments} setClients={setClients} setProjects={setProjects} setTasks={setTasks} setPayments={setPayments} />}
       </div>
 
