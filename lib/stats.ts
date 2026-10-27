@@ -1,4 +1,4 @@
-import { NO_CLIENT, NO_PROJECT, PERSONAL, NO_PROJECT_COLOR, billingOf, dateKey, type Client, type Payment, type Project, type Task } from './game'
+import { NO_CLIENT, NO_PROJECT, PERSONAL, NO_PROJECT_COLOR, billingOf, dateKey, paymentClientId, paymentKind, type Client, type Payment, type Project, type Task } from './game'
 
 export type Period = 'hoy' | 'semana' | 'mes' | 'trimestre' | 'año' | 'todo'
 
@@ -51,8 +51,10 @@ function addDays(d: Date, n: number) {
 export function buildEntries(tasks: Task[], payments: Payment[], projects: Project[], clients: Client[]): Entry[] {
   const projectById = new Map(projects.map((p) => [p.id, p]))
   const clientById = new Map(clients.map((c) => [c.id, c]))
-  const names = (projectId: string | null, fallbackProject: string, fallbackClient: string, fallbackColor: string) => {
+  const names = (projectId: string | null, fallbackProject: string, fallbackClient: string, fallbackColor: string, clientId: string | null = null) => {
     const p = projectId ? projectById.get(projectId) : undefined
+    // Un bonus de plataforma no tiene proyecto: se muestra con el nombre y color de su plataforma.
+    if (!p && clientId && clientById.get(clientId)) return { project: fallbackProject, client: clientById.get(clientId)!.name, color: clientById.get(clientId)!.color }
     if (!p) return { project: fallbackProject, client: fallbackClient, color: fallbackColor }
     const c = p.clientId ? clientById.get(p.clientId) : undefined
     return { project: p.name, client: c?.name ?? PERSONAL, color: p.color }
@@ -61,9 +63,10 @@ export function buildEntries(tasks: Task[], payments: Payment[], projects: Proje
     date: t.date, seconds: t.seconds, amount: t.amount, billable: t.billable, projectId: t.projectId,
     name: t.name, tags: t.tags, isTask: true, valueSeconds: 0, imputed: 0, ...names(t.projectId, t.project, t.client, t.color),
   }))
-  const fromPayments = payments.filter((p) => p.paid).map((p) => ({
+  // Los pagos por horas (payout) no entran: esas horas ya están en las tareas. Sólo cuentan como cobrado.
+  const fromPayments = payments.filter((p) => p.paid && paymentKind(p) !== 'payout').map((p) => ({
     date: p.date, seconds: 0, amount: p.amount, billable: true, projectId: p.projectId,
-    name: p.label || 'Pago', tags: [], isTask: false, valueSeconds: 0, imputed: 0, ...names(p.projectId, NO_PROJECT, NO_CLIENT, NO_PROJECT_COLOR),
+    name: p.label || 'Pago', tags: [], isTask: false, valueSeconds: 0, imputed: 0, ...names(p.projectId, NO_PROJECT, NO_CLIENT, NO_PROJECT_COLOR, p.projectId ? null : paymentClientId(p, projects)),
   }))
   return withHourlyValue([...fromTasks, ...fromPayments], projectById)
 }
@@ -187,6 +190,11 @@ export function computeStats(all: Entry[], period: Period, offset: number, today
   const valueSeconds = entries.reduce((s, t) => s + t.valueSeconds, 0)
   const imputed = entries.reduce((s, t) => s + t.imputed, 0)
   const workedDays = new Set(tasks.map((t) => t.date)).size
+  // Tarifa efectiva: lo ganado en plataformas ÷ todas sus horas, incluido el tiempo no pago.
+  const onPlatform = entries.filter((e) => e.client !== PERSONAL && e.client !== NO_CLIENT)
+  const platformSeconds = onPlatform.reduce((s, e) => s + e.seconds, 0)
+  const platformAmount = onPlatform.reduce((s, e) => s + e.amount, 0)
+  const unpaidSeconds = onPlatform.filter((e) => e.isTask && !e.billable).reduce((s, e) => s + e.seconds, 0)
 
   // Barras: por día salvo año y todo, que van por mes.
   const bins: Bin[] = []
@@ -233,6 +241,8 @@ export function computeStats(all: Entry[], period: Period, offset: number, today
     avgDaily: seconds / elapsedDays,
     avgDailyAmount: amount / elapsedDays,
     perHour: valueSeconds ? imputed / (valueSeconds / 3600) : 0,
+    effectiveRate: platformSeconds > 0 && platformAmount > 0 ? platformAmount / (platformSeconds / 3600) : 0,
+    unpaidSeconds,
     workedDays,
     bins,
     byMonth,

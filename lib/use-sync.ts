@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { SyncError, checkRepo, diffFiles, parseFiles, pullAll, pushChanges, serialize, type AppData, type SyncConfig } from './sync'
+import { SyncError, checkRepo, diffFiles, mergeData, parseFiles, pullAll, pushChanges, serialize, type AppData, type SyncConfig } from './sync'
 
 const CONFIG_KEY = 'tasker-sync'
 const DIRTY_KEY = 'tasker-sync-dirty'
@@ -73,8 +73,9 @@ export function useGitSync({ loaded, data, apply }: { loaded: boolean; data: App
     }
     busy.current = true
     set('saving')
+    let conflicts = 0
     try {
-      await pushChanges(c, changes, shas.current)
+      conflicts = (await pushChanges(c, changes, shas.current)).length
       lastPushed.current = files
       store.set(PUSHED_AT_KEY, String(Date.now()))
       setLastSync(Date.now())
@@ -87,6 +88,8 @@ export function useGitSync({ loaded, data, apply }: { loaded: boolean; data: App
     } finally {
       busy.current = false
     }
+    // Hubo cambios desde otro dispositivo y se fusionaron: se trae el resultado para tenerlo acá también.
+    if (conflicts > 0) await pull('force')
   }
 
   /**
@@ -117,17 +120,28 @@ export function useGitSync({ loaded, data, apply }: { loaded: boolean; data: App
       const identical = diffFiles(localFiles, remoteKnown).length === 0
       const dirty = store.get(DIRTY_KEY) === '1' || diffFiles(localFiles, lastPushed.current).length > 0 && Object.keys(lastPushed.current).length > 0
       let useRemote = !identical
+      let toApply = merged
       if (!identical) {
         if (mode === 'connect') {
-          useRemote = window.confirm('Hay datos en el repo y también en este navegador, y no coinciden.\n\nAceptar = usar los del repo (reemplaza los de este navegador)\nCancelar = subir los de este navegador (reemplaza los del repo)')
+          // Nada se pisa: se combinan por id lo del repo y lo de este navegador.
+          const remoteOnly = (a: { id: string | number }[], b: { id: string | number }[]) => a.filter((x) => !b.some((y) => y.id === x.id)).length
+          const fromRepo = remoteOnly(parsed.data.tasks ?? [], local.tasks)
+          const fromHere = remoteOnly(local.tasks, parsed.data.tasks ?? [])
+          if (!window.confirm(`Hay datos en el repo y también en este navegador, y no coinciden.\n\n· ${fromRepo} tarea(s) solo en el repo\n· ${fromHere} tarea(s) solo en este navegador\n\nSe van a combinar por id (no se pierde nada; si algo está en los dos, gana lo del repo).\n\n¿Combinar y conectar?`)) {
+            disconnect()
+            return
+          }
+          toApply = mergeData(local, { ...local, ...parsed.data } as AppData)
+          useRemote = true
         } else if (mode === 'start' || mode === 'focus') {
           const recentPush = Date.now() - Number(store.get(PUSHED_AT_KEY) || 0) < STALE_WINDOW
           useRemote = !dirty && !recentPush
         }
       }
       lastPushed.current = remoteKnown
-      if (useRemote && !identical) applyRef.current(merged)
+      if (useRemote && !identical) applyRef.current(toApply)
       setReady(true)
+      // Al conectar con datos distintos, lo combinado se sube solo: el efecto de más abajo lo detecta al cambiar los datos.
       if (!useRemote && !identical) {
         busy.current = false
         return await push()

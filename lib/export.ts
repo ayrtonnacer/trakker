@@ -1,5 +1,6 @@
 // Exportar tareas: Markdown para pasárselo a una IA o a un cliente, CSV para una planilla.
 import { fmtClock, fmtHours, fmtMoney, type Task } from './game'
+import type { ReconRow } from './finance'
 
 const byDate = (a: Task, b: Task) => (a.date + (a.start ?? '')).localeCompare(b.date + (b.start ?? '')) || a.id - b.id
 
@@ -66,4 +67,28 @@ export function download(filename: string, text: string, type: string) {
 
 export function slug(text: string) {
   return text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'tareas'
+}
+
+function endTime(start: string | undefined, seconds: number) {
+  const m = start?.match(/^(\d{1,2}):(\d{2})$/)
+  if (!m) return ''
+  const total = (Number(m[1]) * 60 + Number(m[2]) + Math.round(seconds / 60)) % 1440
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+/**
+ * Evidencia de un período para reclamarle un pago a una plataforma: qué trabajaste (Task ID, inicio, fin) y
+ * cuánto dice cada lado. Nunca incluye los memos: pueden tener texto confidencial de las tareas.
+ */
+export function evidenceMarkdown(platform: string, row: ReconRow, tasks: Task[]) {
+  const list = tasks.filter((t) => t.date >= (row.from || '0000-00-00') && t.date <= row.to).sort(byDate)
+  const mine = row.seconds / 3600
+  const out = [`# Evidencia de horas · ${platform}`, '', `Período: ${row.from || list[0]?.date || '—'} al ${row.to}`, '']
+  out.push(`- Horas facturables según mi registro: **${mine.toFixed(2)} h**`)
+  if (row.paidHours !== null) out.push(`- Horas pagadas según la plataforma: **${row.paidHours.toFixed(2)} h** (diferencia: ${(row.paidHours - mine).toFixed(2)} h)`)
+  out.push(`- Estimado a mi tarifa: **US$ ${fmtMoney(row.estimated)}** · Pagado: **US$ ${fmtMoney(row.paid)}** (${row.diff >= 0 ? '+' : '−'}US$ ${fmtMoney(Math.abs(row.diff))})`, '')
+  out.push('| Fecha | Inicio | Fin | Duración | Task ID | Proyecto | Facturable |', '|---|---|---|---|---|---|---|')
+  out.push(...list.map((t) => `| ${t.date} | ${t.start ?? ''} | ${endTime(t.start, t.seconds)} | ${fmtClock(t.seconds)} | ${t.ref ?? ''} | ${t.project} | ${t.billable ? 'sí' : 'no'} |`))
+  out.push('', 'Registro propio hecho con Trakker, tarea por tarea, con el Task ID de la plataforma.', '')
+  return out.join('\n')
 }

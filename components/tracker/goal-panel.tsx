@@ -25,9 +25,10 @@ type Props = {
   tasks: Task[]
   payments: Payment[]
   today: string
+  hourRate?: number // tarifa efectiva de los últimos 90 días: sirve para traducir lo que falta en horas
 }
 
-type GoalDraft = { baseline: string; pct: string; months: string; start: string; milestones: string; custom: boolean }
+type GoalDraft = { baseline: string; pct: string; months: string; start: string; milestones: string; custom: boolean; fixed: string; kind: 'pct' | 'fixed' }
 
 function monthLabel(m: string) {
   const [y, mm] = m.split('-').map(Number)
@@ -35,7 +36,7 @@ function monthLabel(m: string) {
 }
 
 /** Meta de ingresos, siempre la del mes en curso (no cambia con el período de las estadísticas): el objetivo de cada mes y sus micro objetivos (la zanahoria de Inicio). */
-export function GoalPanel({ goal, setGoal, tasks, payments, today }: Props) {
+export function GoalPanel({ goal, setGoal, tasks, payments, today, hourRate = 0 }: Props) {
   const thisMonth = today.slice(0, 7)
   const [draft, setDraft] = useState<GoalDraft | null>(null)
   const [open, setOpen] = useState(true)
@@ -43,16 +44,18 @@ export function GoalPanel({ goal, setGoal, tasks, payments, today }: Props) {
 
   function openDraft() {
     setDraft(goal
-      ? { baseline: String(goal.baseline), pct: String(goal.pct), months: String(goal.months), start: goal.start, milestones: goal.milestones.join(', '), custom: goal.milestones.length > 0 }
-      : { baseline: suggested ? String(suggested) : '', pct: '20', months: '3', start: thisMonth, milestones: '', custom: false })
+      ? { baseline: String(goal.baseline), pct: String(goal.pct), months: String(goal.months), start: goal.start, milestones: goal.milestones.join(', '), custom: goal.milestones.length > 0, fixed: goal.fixed ? String(goal.fixed) : '', kind: goal.fixed ? 'fixed' : 'pct' }
+      : { baseline: suggested ? String(suggested) : '', pct: '20', months: '3', start: thisMonth, milestones: '', custom: false, fixed: '', kind: 'pct' })
   }
 
   function saveDraft() {
     if (!draft) return
+    const fixed = draft.kind === 'fixed' ? parseAmount(draft.fixed) : 0
     const baseline = parseAmount(draft.baseline)
-    if (baseline <= 0) return
+    if (draft.kind === 'fixed' ? fixed <= 0 : baseline <= 0) return
     setGoal({
-      baseline,
+      baseline: baseline > 0 ? baseline : suggested,
+      ...(fixed > 0 ? { fixed } : {}),
       pct: Math.max(1, Number(draft.pct) || 0),
       months: Math.max(1, Math.round(Number(draft.months) || 1)),
       start: draft.start || thisMonth,
@@ -64,12 +67,12 @@ export function GoalPanel({ goal, setGoal, tasks, payments, today }: Props) {
 
   // ---- meta ----
   const months = goal ? Array.from({ length: goal.months + 1 }, (_, i) => addMonths(goal.start, i - 1)) : []
-  const finalTarget = goal ? Math.round(goal.baseline * (1 + goal.pct / 100)) : 0
+  const finalTarget = goal ? (goal.fixed ? Math.round(goal.fixed) : Math.round(goal.baseline * (1 + goal.pct / 100))) : 0
   const target = goalTarget(goal, thisMonth)
   const earned = monthEarnings(thisMonth, tasks, payments)
   const pct = target > 0 ? Math.min(100, Math.round((earned / target) * 100)) : 0
   const steps = milestonesFor(goal, target)
-  const previewTarget = draft ? Math.round(parseAmount(draft.baseline) * (1 + ((Number(draft.pct) || 0) / 100) / Math.max(1, Math.round(Number(draft.months) || 1)))) : 0
+  const previewTarget = draft ? (draft.kind === 'fixed' ? Math.round(parseAmount(draft.fixed)) : Math.round(parseAmount(draft.baseline) * (1 + ((Number(draft.pct) || 0) / 100) / Math.max(1, Math.round(Number(draft.months) || 1))))) : 0
   const maxMonth = Math.max(finalTarget, ...months.map((m) => monthEarnings(m, tasks, payments)), 1)
 
   return (
@@ -97,9 +100,10 @@ export function GoalPanel({ goal, setGoal, tasks, payments, today }: Props) {
               {open && (
                 <div className="goal-detail">
                   <div className="goal-detail-top">
-                    <p className="goal-sentence">Pasar de <b>US$ {fmtShort(goal.baseline)}</b> a <b>US$ {fmtShort(finalTarget)}</b> por mes (+{goal.pct}%) para {monthLabel(addMonths(goal.start, goal.months - 1))}.</p>
+                    {goal.fixed ? <p className="goal-sentence">Llegar a <b>US$ {fmtShort(finalTarget)}</b> por mes desde {monthLabel(goal.start)}.</p> : <p className="goal-sentence">Pasar de <b>US$ {fmtShort(goal.baseline)}</b> a <b>US$ {fmtShort(finalTarget)}</b> por mes (+{goal.pct}%) para {monthLabel(addMonths(goal.start, goal.months - 1))}.</p>}
                     <button className="text-button" onClick={openDraft}>Editar</button>
                   </div>
+                  {target > 0 && earned < target && <p className="goal-sentence">Te faltan <b>US$ {fmtShort(Math.ceil(target - earned))}</b>{hourRate > 0 ? <> = unas <b>{Math.ceil((target - earned) / hourRate)} h</b> a tu tarifa efectiva de US$ {fmtShort(Math.round(hourRate * 100) / 100)}/h</> : ''}.</p>}
                   {target > 0 && <div className="goal-steps">{steps.map((m) => <span key={m} className={earned >= m ? 'done' : ''}>{earned >= m ? <Check /> : <Carrot />} {fmtShort(m)}</span>)}</div>}
                   <div className="month-bars">
                     {months.map((m, i) => {
@@ -128,8 +132,17 @@ export function GoalPanel({ goal, setGoal, tasks, payments, today }: Props) {
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setDraft(null)} aria-label="Cerrar"><X /></button>
             <h2>Meta de ingresos</h2>
-            <p>Quiero aumentar mis ingresos un <b>{draft.pct || 0}%</b> en <b>{draft.months || 1}</b> mes{draft.months === '1' ? '' : 'es'}.</p>
+            <div className="segmented small" role="tablist" aria-label="Tipo de meta">
+              <button type="button" className={draft.kind === 'fixed' ? 'seg-on' : ''} onClick={() => setDraft({ ...draft, kind: 'fixed' })}>Monto por mes</button>
+              <button type="button" className={draft.kind === 'pct' ? 'seg-on' : ''} onClick={() => setDraft({ ...draft, kind: 'pct' })}>Subir un %</button>
+            </div>
+            {draft.kind === 'fixed' ? <p>Quiero ganar <b>US$ {fmtShort(parseAmount(draft.fixed))}</b> por mes.</p> : <p>Quiero aumentar mis ingresos un <b>{draft.pct || 0}%</b> en <b>{draft.months || 1}</b> mes{draft.months === '1' ? '' : 'es'}.</p>}
             <div className="form-grid">
+              {draft.kind === 'fixed' && <>
+                <label>Meta mensual<span className="rate-input"><span>US$</span><input autoFocus inputMode="decimal" value={draft.fixed} onChange={(e) => setDraft({ ...draft, fixed: e.target.value })} placeholder="5000" /><span>/mes</span></span></label>
+                <label>Desde<input type="month" value={draft.start} onChange={(e) => setDraft({ ...draft, start: e.target.value })} /></label>
+              </>}
+              {draft.kind === 'pct' && <>
               <label>Ingreso mensual actual (base)<span className="rate-input"><span>US$</span><input autoFocus inputMode="decimal" value={draft.baseline} onChange={(e) => setDraft({ ...draft, baseline: e.target.value })} placeholder="1000" /><span>/mes</span></span>
                 {suggested > 0 && <small className="field-help">Tu promedio de los últimos 3 meses es US$ {fmtShort(suggested)}. <button type="button" className="text-button" onClick={() => setDraft({ ...draft, baseline: String(suggested) })}>Usar</button></small>}
               </label>
@@ -138,6 +151,7 @@ export function GoalPanel({ goal, setGoal, tasks, payments, today }: Props) {
                 <label>En meses<input inputMode="numeric" value={draft.months} onChange={(e) => setDraft({ ...draft, months: e.target.value })} /></label>
                 <label>Desde<input type="month" value={draft.start} onChange={(e) => setDraft({ ...draft, start: e.target.value })} /></label>
               </div>
+              </>}
               <div className="field">
                 <span>Micro objetivos de cada mes</span>
                 {!draft.custom ? (
@@ -149,12 +163,12 @@ export function GoalPanel({ goal, setGoal, tasks, payments, today }: Props) {
                   </>
                 )}
               </div>
-              {parseAmount(draft.baseline) > 0 && <small className="field-help">Meta final: US$ {fmtShort(Math.round(parseAmount(draft.baseline) * (1 + (Number(draft.pct) || 0) / 100)))} por mes en {monthLabel(addMonths(draft.start || monthKey(), Math.max(1, Number(draft.months) || 1) - 1))}.</small>}
+              {draft.kind === 'pct' && parseAmount(draft.baseline) > 0 && <small className="field-help">Meta final: US$ {fmtShort(Math.round(parseAmount(draft.baseline) * (1 + (Number(draft.pct) || 0) / 100)))} por mes en {monthLabel(addMonths(draft.start || monthKey(), Math.max(1, Number(draft.months) || 1) - 1))}.</small>}
             </div>
             <div className="modal-actions">
               {goal && <button className="ghost-button danger-text" onClick={() => { if (window.confirm('¿Borrar la meta y sus acciones?')) { setGoal(null); setDraft(null) } }}>Borrar meta</button>}
               <button className="ghost-button" onClick={() => setDraft(null)}>Cancelar</button>
-              <button className="primary-button" onClick={saveDraft} disabled={parseAmount(draft.baseline) <= 0}>Guardar meta</button>
+              <button className="primary-button" onClick={saveDraft} disabled={parseAmount(draft.kind === 'fixed' ? draft.fixed : draft.baseline) <= 0}>Guardar meta</button>
             </div>
           </div>
         </div>

@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { RefreshCw, X } from 'lucide-react'
-import type { SyncConfig } from '@/lib/sync'
+import { Download, RefreshCw, Upload, X } from 'lucide-react'
+import type { AppData, SyncConfig } from '@/lib/sync'
+import { backupAgeDays, downloadBackup } from '@/lib/backup'
 import type { SyncStatus } from '@/lib/use-sync'
 
 type Props = {
@@ -14,6 +15,11 @@ type Props = {
   onDisconnect: () => void
   onSyncNow: () => Promise<void>
   onClose: () => void
+  data: AppData
+  lastBackup: number | null
+  onBackup: () => void
+  /** Aplica un backup leído del archivo. Devuelve un mensaje de error o '' si salió bien. */
+  onRestore: (raw: string) => string
 }
 
 export const STATUS_LABEL: Record<SyncStatus, string> = {
@@ -25,10 +31,11 @@ export const STATUS_LABEL: Record<SyncStatus, string> = {
   error: 'Error al guardar',
 }
 
-export function SyncModal({ cfg, status, message, lastSync, onConnect, onDisconnect, onSyncNow, onClose }: Props) {
+export function SyncModal({ cfg, status, message, lastSync, onConnect, onDisconnect, onSyncNow, onClose, data, lastBackup, onBackup, onRestore }: Props) {
   const [form, setForm] = useState({ repo: cfg?.repo ?? '', token: '' })
   const [error, setError] = useState('')
   const [working, setWorking] = useState(false)
+  const [backupMsg, setBackupMsg] = useState('')
 
   async function connect() {
     setError('')
@@ -84,6 +91,25 @@ export function SyncModal({ cfg, status, message, lastSync, onConnect, onDisconn
             </div>
           </>
         )}
+
+        <div className="backup-box">
+          <h3>Backup en un archivo</h3>
+          <p>Una copia completa (tareas, plataformas, pagos, metas) que podés guardar donde quieras. {lastBackup ? `Último backup: hace ${backupAgeDays(lastBackup)} día${backupAgeDays(lastBackup) === 1 ? '' : 's'}.` : 'Todavía no hiciste ninguno.'}</p>
+          <div className="backup-actions">
+            <button className="ghost-button" onClick={() => { downloadBackup(data); onBackup(); setBackupMsg('Backup descargado.') }}><Download /> Descargar backup</button>
+            <label className="ghost-button file-button"><Upload /> Restaurar desde archivo
+              <input type="file" accept="application/json,.json" hidden onChange={async (e) => {
+                const f = e.target.files?.[0]
+                e.target.value = ''
+                if (!f) return
+                if (!window.confirm('Restaurar reemplaza todos los datos de este navegador por los del archivo. ¿Seguir?')) return
+                const err = onRestore(await f.text())
+                setBackupMsg(err || 'Backup restaurado.')
+              }} />
+            </label>
+          </div>
+          {backupMsg && <p role="status">{backupMsg}</p>}
+        </div>
 
         <p className="sync-note">Archivos: <code>clientes.md</code>, <code>metas.md</code> y <code>tareas/AAAA-MM.md</code>. Cada uno tiene una tabla para leer y, al final, un bloque <code>trakker:data</code> que es lo que la app lee. Para corregir algo, hacelo desde la app.</p>
       </div>

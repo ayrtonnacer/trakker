@@ -17,6 +17,7 @@ import {
   migrateProject,
   migrateTask,
   milestonesFor,
+  monthCollected,
   monthEarnings,
   parseTags,
   streakFor,
@@ -42,6 +43,8 @@ import { TaskRow } from '@/components/tracker/task-row'
 import { TasksView, dayLabel } from '@/components/tracker/tasks-view'
 import { STATUS_LABEL, SyncModal } from '@/components/tracker/sync-modal'
 import { useGitSync } from '@/lib/use-sync'
+import type { AppData } from '@/lib/sync'
+import { BACKUP_REMINDER_DAYS, backupAgeDays, downloadBackup, markBackup, readBackupTime, parseBackup } from '@/lib/backup'
 
 // Se mantiene la clave de versiones anteriores para no perder los datos guardados.
 const STORAGE_KEY = 'tiempo-oro-v1'
@@ -55,7 +58,7 @@ const TABS: { id: string; icon: typeof Home }[] = [
   { id: 'Estadísticas', icon: BarChart3 },
 ]
 
-type Active = { base: number; startedAt: number | null; startTime?: string; target?: number } // target: segundos de la cuenta regresiva
+type Active = { base: number; startedAt: number | null; startTime?: string; startDate?: string; target?: number } // target: segundos de la cuenta regresiva
 type Mode = { down: boolean; minutes: number }
 type Draft = { name: string; projectId: string | null; billable: boolean; tags: string; note: string; ref?: string; planId?: string; routineId?: string } // planId: viene del backlog; routineId: de una rutina
 type Toast = { id: number; title: string; text: string }
@@ -68,7 +71,7 @@ const EMPTY_DRAFT: Draft = { name: '', projectId: null, billable: false, tags: '
 
 function seedData(today: string) {
   const clients: Client[] = [
-    { id: 'c-outlier', name: 'Outlier', color: '#2f6f9f', status: 'activo', links: [{ label: 'Plataforma', url: 'https://app.outlier.ai' }, { label: 'Pagos', url: 'https://app.outlier.ai/earnings' }], notes: 'Pagan semanal, martes a la noche (hora del Pacífico).' },
+    { id: 'c-outlier', name: 'Outlier', color: '#2f6f9f', status: 'activo', links: [{ label: 'Plataforma', url: 'https://app.outlier.ai' }, { label: 'Pagos', url: 'https://app.outlier.ai/earnings' }], notes: '', payMethod: 'Airtm', payDay: 'Martes a la noche (hora del Pacífico)', payer: 'Scale AI, Inc.' },
     { id: 'c-meridial', name: 'Meridial', color: '#d9730d', status: 'onboarding', links: [], notes: 'Onboarding pago por hora.' },
     { id: 'c-upwork', name: 'Upwork', color: '#448361', status: 'aplicado', links: [{ label: 'Propuestas', url: 'https://www.upwork.com/nx/proposals' }], notes: '' },
   ]
@@ -94,6 +97,18 @@ function minutesOf(hhmm: string) {
 function addMinutes(hhmm: string, minutes: number) {
   const total = (((minutesOf(hhmm) || 0) + minutes) % 1440 + 1440) % 1440
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+/** Día en que arrancó la tarea en curso: si cruza la medianoche, la tarea queda en el día del inicio. */
+function startDateOf(active: Active) {
+  if (active.startDate) return active.startDate
+  // Tareas en curso guardadas antes de este cambio: si la hora de inicio es posterior a la actual, arrancó ayer.
+  if (active.startTime && active.startTime > timeKey()) {
+    const d = new Date()
+    d.setDate(d.getDate() - 1)
+    return dateKey(d)
+  }
+  return dateKey()
 }
 
 export default function Page() {
@@ -125,25 +140,24 @@ export default function Page() {
 
   // Los datos que se guardan como .md en GitHub (el timer en curso queda sólo en este navegador).
   const data = useMemo(() => ({ tasks, clients, projects, payments, goal, plan, routines }), [tasks, clients, projects, payments, goal, plan, routines])
-  const sync = useGitSync({
-    loaded,
-    data,
-    apply: (d) => {
-      setTasks(d.tasks.map(migrateTask))
-      setClients(d.clients)
-      setProjects(d.projects.map(migrateProject))
-      setPayments(d.payments)
-      setGoal(d.goal)
-      setPlan(d.plan)
-      setRoutines(d.routines ?? [])
-    },
-  })
+  const applyData = (d: AppData) => {
+    setTasks(d.tasks.map(migrateTask))
+    setClients(d.clients)
+    setProjects(d.projects.map(migrateProject))
+    setPayments(d.payments)
+    setGoal(d.goal)
+    setPlan(d.plan)
+    setRoutines(d.routines ?? [])
+  }
+  const sync = useGitSync({ loaded, data, apply: applyData })
+  const [lastBackup, setLastBackup] = useState<number | null>(null)
 
   // Carga inicial desde el navegador.
   useEffect(() => {
     const key = dateKey()
     setToday(key)
     setNow(Date.now())
+    setLastBackup(readBackupTime())
     const seed = seedData(key)
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY)
@@ -239,6 +253,7 @@ export default function Page() {
       weekDays: week.filter((w) => w.secs > 0).length,
       streak: streakFor(dates),
       monthEarned: monthEarnings(month, tasks, payments),
+      monthCollected: monthCollected(month, payments),
       monthTarget: goalTarget(goal, month),
     }
   }, [tasks, payments, goal, today])
@@ -286,7 +301,7 @@ export default function Page() {
     if (!draft.projectId) return askProject()
     const t = Date.now()
     setNow(t)
-    setActive((a) => ({ ...a, startedAt: t, startTime: a.startTime ?? timeKey(), target: a.target ?? (mode.down ? Math.max(1, mode.minutes) * 60 : undefined) }))
+    setActive((a) => ({ ...a, startedAt: t, startTime: a.startTime ?? timeKey(), startDate: a.startDate ?? (a.startTime ? startDateOf(a) : dateKey()), target: a.target ?? (mode.down ? Math.max(1, mode.minutes) * 60 : undefined) }))
   }
 
   // Cuando la cuenta regresiva llega a cero se registra sola la tarea.
@@ -330,7 +345,7 @@ export default function Page() {
     const { name, ref } = splitRef(draft.name, draft.ref)
     record(buildTask({
       name, ref, seconds: elapsed, projectId: draft.projectId, billable: draft.billable,
-      tags: parseTags(draft.tags), date: dateKey(), start: active.startTime, note: draft.note, routineId: draft.routineId, projects, clients,
+      tags: parseTags(draft.tags), date: startDateOf(active), start: active.startTime, note: draft.note, routineId: draft.routineId, projects, clients,
     }))
     // Si venía del backlog, ya está hecha: sale de "por hacer".
     if (draft.planId) removePlan(draft.planId)
@@ -361,7 +376,7 @@ export default function Page() {
     }
     const t = Date.now()
     setNow(t)
-    setActive({ base: 0, startedAt: t, startTime: timeKey(), target: mode.down ? Math.max(1, mode.minutes) * 60 : undefined })
+    setActive({ base: 0, startedAt: t, startTime: timeKey(), startDate: dateKey(), target: mode.down ? Math.max(1, mode.minutes) * 60 : undefined })
   }
 
   function repeatTask(task: Task) {
@@ -507,6 +522,9 @@ export default function Page() {
 
       <div className="content-wrap">
         {activeTab === 'Inicio' && <>
+          {loaded && sync.status === 'off' && (tasks.length > 0 || payments.length > 0) && backupAgeDays(lastBackup) >= BACKUP_REMINDER_DAYS && (
+            <div className="backup-reminder" role="status"><span><b>Tus datos viven solo en este navegador.</b> {lastBackup ? `Hace ${backupAgeDays(lastBackup)} días que no hacés un backup.` : 'Todavía no hiciste ningún backup.'}</span><button className="ghost-button" onClick={() => { downloadBackup(data); markBackup(); setLastBackup(Date.now()) }}>Descargar backup</button><button className="text-button" onClick={() => setSyncOpen(true)}>Guardar en GitHub</button></div>
+          )}
           <section className="welcome-row"><p className="eyebrow">{headerDate}</p><h1>Hola, Ayrton</h1></section>
 
           <section className={`timer-bar ${running ? 'is-running' : ''}`}>
@@ -550,6 +568,7 @@ export default function Page() {
               {draft.note && <small>{draft.note.length.toLocaleString('es-AR')} caracteres</small>}
             </div>
             <AutoTextarea className="memo-text" autoFocus={noteOpen && !draft.note} rows={4} value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') setNoteOpen(false) }} maxLength={20000} placeholder="Pegá las indicaciones de la tarea o anotá qué hiciste, decisiones, lo que falta…" aria-label="Memo de la tarea" />
+            <p className="memo-warning">Solo notas propias. Las plataformas prohíben compartir el contenido de las tareas: no pegues acá texto confidencial del proyecto. Los reportes para compartir y la evidencia de pagos no incluyen los memos.</p>
           </div>}
           <div className="timer-sub">
             {!running && mode.down && <span className="countdown-presets">Cuenta regresiva: {PRESET_MINUTES.map((m) => <button key={m} className={mode.minutes === m ? 'preset-on' : ''} onClick={() => setMode({ down: true, minutes: m })}>{m} min</button>)}<input type="number" min={1} max={600} value={mode.minutes} onChange={(e) => setMode({ down: true, minutes: Math.min(600, Math.max(1, Math.round(Number(e.target.value)) || 1)) })} aria-label="Minutos" /> min</span>}
@@ -562,7 +581,7 @@ export default function Page() {
 
           <section className="hud-grid">
             <article className="card earnings-card">
-              <div className="card-label"><span>Ganado en {monthName}</span>{stats.monthTarget ? <span>Meta del mes US$ {fmtShort(stats.monthTarget)}</span> : <button className="text-button" onClick={() => { setActiveTab('Estadísticas'); window.setTimeout(() => document.getElementById('meta')?.scrollIntoView({ behavior: 'smooth' }), 50) }}>Definir meta</button>}</div>
+              <div className="card-label"><span>Ganado en {monthName} <small title="Horas × tarifa más cobros y bonus. Lo que te pagaron de verdad está abajo.">(estimado)</small></span>{stats.monthTarget ? <span>Meta del mes US$ {fmtShort(stats.monthTarget)}</span> : <button className="text-button" onClick={() => { setActiveTab('Estadísticas'); window.setTimeout(() => document.getElementById('meta')?.scrollIntoView({ behavior: 'smooth' }), 50) }}>Definir meta</button>}</div>
               <div className="hero-number">US$ {fmtMoney(monthLive)}</div>
               <div className="carrot-track">
                 <div className="carrot-fill" style={{ width: `${Math.min(100, (monthLive / barTarget) * 100)}%` }} />
@@ -577,6 +596,7 @@ export default function Page() {
                 {nextStep > 0 ? <span>Faltan <b>US$ {fmtShort(Math.ceil((nextStep - monthLive) * 100) / 100)}</b> para llegar a {fmtShort(nextStep)}</span> : stats.monthTarget ? <span><b>¡Meta del mes cumplida!</b></span> : <span>Con una meta vas a ver micro objetivos en esta barra.</span>}
                 <span>Hoy US$ {fmtMoney(stats.todayGold + liveGold)}</span>
               </div>
+              {payments.some((p) => p.paid) && <div className="card-foot"><span>Cobrado en {monthName} <b>US$ {fmtMoney(stats.monthCollected)}</b></span>{stats.monthEarned > 0 && <span>{stats.monthCollected >= stats.monthEarned ? 'Al día' : `Falta cobrar US$ ${fmtShort(Math.round(stats.monthEarned - stats.monthCollected))}`}</span>}</div>}
             </article>
             <article className={`card streak-card ${workedToday ? 'lit' : ''}`}>
               <div className="streak-top">
@@ -629,7 +649,7 @@ export default function Page() {
           <div className="field"><span>Proyecto</span><ProjectPicker projects={projects} clients={clients} value={manual.projectId} onChange={(id) => setManual({ ...manual, projectId: id, billable: defaultBillable(id, projects, clients) })} onCreateProject={(p) => setProjects((cur) => [...cur, p])} /></div>
           <label>Etiquetas<input placeholder="diseño, reunión" value={manual.tags} onChange={(e) => setManual({ ...manual, tags: e.target.value })} /></label>
           <div className="modal-fields three"><label>Fecha<input type="date" value={manual.date} onChange={(e) => setManual({ ...manual, date: e.target.value })} /></label><label>Desde<input type="time" value={manual.from} onChange={(e) => setManual({ ...manual, from: e.target.value })} /></label><label>Hasta<input type="time" value={manual.to} onChange={(e) => setManual({ ...manual, to: e.target.value })} /></label></div>
-          <label>Memo<AutoTextarea className="memo-text" rows={4} max={360} value={manual.note} onChange={(e) => setManual({ ...manual, note: e.target.value })} maxLength={20000} placeholder="Indicaciones de la tarea, qué hiciste, lo que quedó pendiente…" /></label>
+          <label>Memo<AutoTextarea className="memo-text" rows={4} max={360} value={manual.note} onChange={(e) => setManual({ ...manual, note: e.target.value })} maxLength={20000} placeholder="Notas propias: qué hiciste, lo que quedó pendiente…" /><small className="memo-warning">No pegues texto confidencial de las tareas: las plataformas lo prohíben.</small></label>
           {canBill(manual.projectId, projects) ? <label className="check-line"><input type="checkbox" checked={manual.billable} onChange={(e) => setManual({ ...manual, billable: e.target.checked })} /> Facturable{manual.billable && (manualRate > 0 ? ` · ${manualRate} USD/h` : ' · sin tarifa por hora')}</label> : <small className="field-help">Proyecto personal: suma tiempo, no se factura.</small>}
         </div>
         {manualError && <p className="form-error">{manualError}</p>}
@@ -640,7 +660,7 @@ export default function Page() {
         </div>
       </div></div>}
 
-      {syncOpen && <SyncModal cfg={sync.cfg} status={sync.status} message={sync.message} lastSync={sync.lastSync} onConnect={sync.connect} onDisconnect={sync.disconnect} onSyncNow={sync.syncNow} onClose={() => setSyncOpen(false)} />}
+      {syncOpen && <SyncModal cfg={sync.cfg} status={sync.status} message={sync.message} lastSync={sync.lastSync} onConnect={sync.connect} onDisconnect={sync.disconnect} onSyncNow={sync.syncNow} onClose={() => setSyncOpen(false)} data={data} lastBackup={lastBackup} onBackup={() => { markBackup(); setLastBackup(Date.now()) }} onRestore={(raw) => { const d = parseBackup(raw); if (typeof d === 'string') return d; applyData(d); markBackup(); setLastBackup(Date.now()); return '' }} />}
 
       <div className="confetti" aria-hidden="true">{pieces.map((p) => <span key={p.id} className={p.round ? 'round' : ''} style={{ width: p.s, height: p.round ? p.s : p.s * 0.45, animationDelay: `${p.d}s`, ['--x' as string]: `${p.x}px`, ['--y' as string]: `${p.y}px`, ['--r' as string]: `${p.r}deg` }} />)}</div>
       <div className="toast-stack" role="status" aria-live="polite">{toasts.map((t) => <div className="toast" key={t.id}><strong>{t.title}</strong><span>{t.text}</span></div>)}</div>

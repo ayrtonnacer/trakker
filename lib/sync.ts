@@ -2,7 +2,7 @@
 // Cada archivo tiene una tabla legible y, al final, un bloque <!-- trakker:data --> con
 // el dato exacto: ese bloque es la fuente de verdad al leer. Editar la tabla a mano no
 // cambia nada; para corregir algo, usá la app (o editá el bloque de datos).
-import { clientStatus, fmtClock, fmtMoney, type Client, type Goal, type Payment, type PlanItem, type Project, type Routine, type Task } from './game'
+import { PAYMENT_KIND_LABEL, clientStatus, fmtClock, fmtMoney, paymentClientId, paymentKind, type Client, type Goal, type Payment, type PlanItem, type Project, type Routine, type Task } from './game'
 
 export type AppData = { tasks: Task[]; clients: Client[]; projects: Project[]; payments: Payment[]; goal: Goal | null; plan: PlanItem[]; routines: Routine[] }
 export type SyncConfig = { repo: string; branch: string; dir: string; token: string }
@@ -80,9 +80,10 @@ function clientsFile(d: AppData) {
   const loose = d.projects.filter((p) => !p.clientId || !d.clients.some((c) => c.id === p.clientId))
   if (loose.length) section('Personal / interno', loose)
   if (d.payments.length) {
-    out.push('## Pagos', '', '| Fecha | Proyecto | Concepto | US$ | Estado |', '|---|---|---|---:|---|')
+    out.push('## Pagos', '', '| Fecha | Plataforma / proyecto | Tipo | Concepto | Período | US$ | Comisión | Método | Estado |', '|---|---|---|---|---|---:|---:|---|---|')
     const sorted = [...d.payments].sort((a, b) => a.date.localeCompare(b.date))
-    out.push(...sorted.map((p) => `| ${p.date} | ${cell(projectName.get(p.projectId ?? '') ?? '—')} | ${cell(p.label)} | ${p.amount.toFixed(2)} | ${p.paid ? 'cobrado' : 'pendiente'} |`), '')
+    const clientName = (p: (typeof sorted)[number]) => d.clients.find((c) => c.id === paymentClientId(p, d.projects))?.name
+    out.push(...sorted.map((p) => `| ${p.date} | ${cell(projectName.get(p.projectId ?? '') ?? clientName(p) ?? '—')} | ${PAYMENT_KIND_LABEL[paymentKind(p)]} | ${cell(p.label)} | ${p.from || p.to ? `${p.from ?? ''} → ${p.to ?? ''}` : ''} | ${p.amount.toFixed(2)} | ${(p.fee ?? 0).toFixed(2)} | ${cell(p.method ?? '')} | ${p.paid ? 'cobrado' : 'pendiente'} |`), '')
   }
   const data = `{\n"clients": ${lines(d.clients)},\n"projects": ${lines(d.projects)},\n"payments": ${lines(d.payments)}\n}`
   out.push(block(data))
@@ -93,7 +94,7 @@ function goalsFile(d: AppData) {
   const out = ['# Meta de ingresos y por hacer', '']
   const g = d.goal
   if (g) {
-    out.push(`**Meta:** pasar de US$ ${g.baseline}/mes a +${g.pct}% en ${g.months} mes(es), desde ${g.start}.`, '')
+    out.push(g.fixed ? `**Meta:** US$ ${g.fixed} por mes, desde ${g.start}.` : `**Meta:** pasar de US$ ${g.baseline}/mes a +${g.pct}% en ${g.months} mes(es), desde ${g.start}.`, '')
     if (g.milestones.length) out.push(`Micro objetivos: ${g.milestones.join(', ')}`, '')
     if (g.actions.length) out.push('### Acciones', '', ...g.actions.map((a) => `- [${a.done ? 'x' : ' '}] ${a.text}`), '')
   } else out.push('Sin meta definida.', '')
@@ -140,6 +141,47 @@ export function parseFiles(files: Record<string, string>) {
     data.tasks = tasks
   }
   return { data, found }
+}
+
+// ---------- fusión por id ----------
+
+/** Une dos listas por `id`. Si el mismo id está en las dos, gana `over`. El orden: primero `base`, después lo nuevo de `over`. */
+export function mergeById<T extends { id: string | number }>(base: T[], over: T[]): T[] {
+  const incoming = new Map(over.map((x) => [x.id, x]))
+  const out = base.map((x) => incoming.get(x.id) ?? x)
+  const seen = new Set(base.map((x) => x.id))
+  over.forEach((x) => { if (!seen.has(x.id)) out.push(x) })
+  return out
+}
+
+/** Une dos copias completas de los datos: nada se pierde, y ante el mismo id gana `over`. */
+export function mergeData(base: AppData, over: AppData): AppData {
+  return {
+    tasks: mergeById(base.tasks, over.tasks),
+    clients: mergeById(base.clients, over.clients),
+    projects: mergeById(base.projects, over.projects),
+    payments: mergeById(base.payments, over.payments),
+    goal: over.goal ?? base.goal,
+    plan: mergeById(base.plan, over.plan),
+    routines: mergeById(base.routines, over.routines ?? []),
+  }
+}
+
+const EMPTY: AppData = { tasks: [], clients: [], projects: [], payments: [], goal: null, plan: [], routines: [] }
+
+/**
+ * Cuando un archivo cambió en GitHub mientras lo editabas (otro dispositivo), en vez de pisarlo se fusiona por id:
+ * lo del otro dispositivo se conserva y tu versión gana en lo que tocaste. Devuelve el contenido nuevo, o null si
+ * no se puede fusionar (ahí se sube el local como estaba).
+ */
+export function mergeConflict(path: string, local: string, remote: string): string | null {
+  const l = readBlock(local)
+  const r = readBlock(remote)
+  if (!l || !r) return null
+  if (path === CLIENTS_FILE) return clientsFile({ ...EMPTY, clients: mergeById(r.clients ?? [], l.clients ?? []), projects: mergeById(r.projects ?? [], l.projects ?? []), payments: mergeById(r.payments ?? [], l.payments ?? []) })
+  if (path === GOALS_FILE) return goalsFile({ ...EMPTY, goal: l.goal ?? r.goal ?? null, plan: mergeById(r.plan ?? [], l.plan ?? []), routines: mergeById(r.routines ?? [], l.routines ?? []) })
+  if (path.startsWith(`${TASKS_DIR}/`) && Array.isArray(l) && Array.isArray(r)) return tasksFile(path.slice(TASKS_DIR.length + 1).replace(/\.md$/, ''), mergeById<Task>(r, l))
+  return null
 }
 
 /** Cambios necesarios para pasar de `prev` a `next`. */
@@ -220,7 +262,9 @@ export async function pullAll(c: SyncConfig) {
   return { files, shas }
 }
 
+/** Sube los cambios. Devuelve las rutas que se fusionaron con lo que había en GitHub: hay que volver a leerlas. */
 export async function pushChanges(c: SyncConfig, changes: Change[], shas: Record<string, string>) {
+  const merged: string[] = []
   for (const ch of changes) {
     const send = async (sha?: string) => {
       const body = ch.content === null
@@ -243,10 +287,17 @@ export async function pushChanges(c: SyncConfig, changes: Change[], shas: Record
       if (f) shas[ch.path] = f.sha
       else delete shas[ch.path]
       if (ch.content === null && !f) continue
+      // Si el archivo cambió desde otro dispositivo, se fusiona por id para no pisar lo del otro.
+      if (f && ch.content !== null) {
+        const union = mergeConflict(ch.path, ch.content, f.text)
+        if (union !== null && union !== f.text) { ch.content = union; merged.push(ch.path) }
+        else if (union === f.text) { merged.push(ch.path); continue }
+      }
       res = await send(shas[ch.path])
     }
     const j = await res.json()
     if (ch.content === null) delete shas[ch.path]
     else if (j.content?.sha) shas[ch.path] = j.content.sha
   }
+  return merged
 }

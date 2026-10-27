@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, ChevronDown, ChevronRight, FolderPlus, IdCard, LayoutList, Pencil, Plus, Search, StickyNote, Trash2, UserPlus, Users, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, FileText, FolderPlus, IdCard, Landmark, LayoutList, Pencil, Plus, Search, StickyNote, Trash2, UserPlus, Users, X } from 'lucide-react'
 import {
   BILLING_LABEL,
   CLIENT_STATUSES,
@@ -9,6 +9,8 @@ import {
   STAGE_GROUPS,
   clientStatus,
   NO_CLIENT,
+  PAY_METHODS,
+  PAYMENT_KIND_LABEL,
   PERSONAL,
   PALETTE,
   billingOf,
@@ -19,6 +21,8 @@ import {
   goldFor,
   normalizeUrl,
   parseAmount,
+  paymentClientId,
+  paymentKind,
   uid,
   type Billing,
   type Client,
@@ -29,6 +33,8 @@ import {
   type ProjectStatus,
   type Task,
 } from '@/lib/game'
+import { CONCENTRATION_LIMIT, concentration, platformFinance, reconcile, type ReconRow } from '@/lib/finance'
+import { download, evidenceMarkdown, slug } from '@/lib/export'
 import { ExportMenu } from './export-menu'
 import { LinkChip, LinksEditor } from './link-chip'
 
@@ -43,9 +49,10 @@ type Props = {
   setPayments: (fn: (p: Payment[]) => Payment[]) => void
 }
 
-type ClientDraft = { id?: string; name: string; color: string; status: ClientStatus; notes: string; links: Link[]; since: string }
+type ClientDraft = { id?: string; name: string; color: string; status: ClientStatus; notes: string; links: Link[]; since: string; payer: string; payMethod: string; payDay: string }
 type ProjectDraft = { id?: string; name: string; clientId: string; billing: Billing; rate: string; price: string; color: string; status: ProjectStatus; links: Link[] }
 type PaymentDraft = { projectId: string; label: string; amount: string; date: string }
+type PayoutDraft = { clientId: string; kind: 'payout' | 'bonus'; amount: string; hours: string; from: string; to: string; date: string; method: string; fee: string; label: string }
 
 const STATUSES = CLIENT_STATUSES
 const cleanLinks = (links: Link[]) => links.filter((l) => l.url.trim()).map((l) => ({ label: l.label.trim() || hostOf(l.url), url: normalizeUrl(l.url) }))
@@ -93,6 +100,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
   const [clientDraft, setClientDraft] = useState<ClientDraft | null>(null)
   const [projectDraft, setProjectDraft] = useState<ProjectDraft | null>(null)
   const [paymentDraft, setPaymentDraft] = useState<PaymentDraft | null>(null)
+  const [payoutDraft, setPayoutDraft] = useState<PayoutDraft | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [openPayments, setOpenPayments] = useState<Record<string, boolean>>({})
   const [statusFilter, setStatusFilter] = useState<ClientStatus | 'personal' | ''>('')
@@ -120,7 +128,8 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
     // Tareas sin proyecto se cuentan por el nombre de cliente con que se registraron.
     const loose = tasks.filter((t) => !t.projectId && t.client === (c?.name ?? NO_CLIENT))
     const ts = [...tasks.filter((t) => t.projectId && ids.has(t.projectId)), ...loose]
-    const paid = payments.filter((x) => x.paid && x.projectId && ids.has(x.projectId)).reduce((s, x) => s + x.amount, 0)
+    // Cobros y bonus suman a lo ganado; los pagos por horas no (esas horas ya están en las tareas).
+    const paid = payments.filter((x) => x.paid && paymentKind(x) !== 'payout' && (c ? paymentClientId(x, projects) === c.id : !!x.projectId && ids.has(x.projectId))).reduce((s, x) => s + x.amount, 0)
     // Por cobrar: cobros pendientes y lo que falta de cada presupuesto.
     const pending = own.reduce((s, p) => {
       const ps = payments.filter((x) => x.projectId === p.id)
@@ -136,7 +145,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
 
   // ---- clientes ----
   function newClient() {
-    setClientDraft({ name: '', color: PALETTE[clients.length % PALETTE.length], status: 'vista', notes: '', links: [{ label: '', url: '' }], since: dateKey() })
+    setClientDraft({ name: '', color: PALETTE[clients.length % PALETTE.length], status: 'vista', notes: '', links: [{ label: '', url: '' }], since: dateKey(), payer: '', payMethod: '', payDay: '' })
     setError('')
   }
 
@@ -146,7 +155,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
     if (!name) return setError('Ponele un nombre a la plataforma.')
     if (clients.some((c) => c.id !== clientDraft.id && c.name.toLowerCase() === name.toLowerCase())) return setError(`Ya existe una plataforma llamada “${name}”.`)
     const links = cleanLinks(clientDraft.links)
-    const data = { name, color: clientDraft.color, status: clientDraft.status, notes: clientDraft.notes.trim(), links, since: clientDraft.since }
+    const data = { name, color: clientDraft.color, status: clientDraft.status, notes: clientDraft.notes.trim(), links, since: clientDraft.since, payer: clientDraft.payer.trim(), payMethod: clientDraft.payMethod, payDay: clientDraft.payDay.trim() }
     if (clientDraft.id) {
       const old = clients.find((c) => c.id === clientDraft.id)
       setClients((cur) => cur.map((c) => (c.id === clientDraft.id ? { ...c, ...data } : c)))
@@ -161,7 +170,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
   }
 
   function editClient(c: Client) {
-    setClientDraft({ id: c.id, name: c.name, color: c.color, status: clientStatus(c), notes: c.notes ?? '', links: c.links?.length ? c.links : [{ label: '', url: '' }], since: c.since ?? '' })
+    setClientDraft({ id: c.id, name: c.name, color: c.color, status: clientStatus(c), notes: c.notes ?? '', links: c.links?.length ? c.links : [{ label: '', url: '' }], since: c.since ?? '', payer: c.payer ?? '', payMethod: c.payMethod ?? '', payDay: c.payDay ?? '' })
     setError('')
   }
 
@@ -172,8 +181,10 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
 
   function deleteClient(c: Client) {
     const n = projects.filter((p) => p.clientId === c.id).length
-    if (!window.confirm(`¿Borrar la plataforma “${c.name}”?${n ? ` Sus ${n} proyecto(s) pasan a Personal.` : ''} Las tareas ya registradas no cambian.`)) return
+    if (!window.confirm(`¿Borrar la plataforma “${c.name}”?${n ? ` Sus ${n} proyecto(s) pasan a Personal.` : ''} Sus pagos recibidos se borran; las tareas ya registradas no cambian.`)) return
     setClients((cur) => cur.filter((x) => x.id !== c.id))
+    // Los pagos que se registraron a nombre de la plataforma (por horas y bonus) se van con ella.
+    setPayments((cur) => cur.filter((x) => x.clientId !== c.id))
     setSheetId(null)
     setProjects((cur) => cur.map((p) => (p.clientId === c.id ? { ...p, clientId: null } : p)))
   }
@@ -248,6 +259,44 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
     setPayments((cur) => [...cur, { id: uid(), projectId: paymentDraft.projectId, label: paymentDraft.label.trim() || 'Pago', amount, date: paymentDraft.date || dateKey(), paid: true }])
     setPaymentDraft(null)
     setError('')
+  }
+
+  /** Registra lo que una plataforma te pagó. El período arranca donde terminó el pago anterior. */
+  function newPayout(clientId: string, kind: 'payout' | 'bonus' = 'payout') {
+    const client = clients.find((c) => c.id === clientId)
+    const last = payments.filter((p) => p.paid && paymentKind(p) === 'payout' && paymentClientId(p, projects) === clientId).reduce((m, p) => ((p.to ?? p.date) > m ? (p.to ?? p.date) : m), '')
+    const from = last ? (() => { const d = new Date(`${last}T12:00:00`); d.setDate(d.getDate() + 1); return dateKey(d) })() : ''
+    setPayoutDraft({ clientId, kind, amount: '', hours: '', from, to: dateKey(), date: dateKey(), method: client?.payMethod ?? '', fee: '', label: '' })
+    setError('')
+  }
+
+  function savePayout() {
+    if (!payoutDraft) return
+    const amount = parseAmount(payoutDraft.amount)
+    if (!payoutDraft.clientId) return setError('Elegí la plataforma que te pagó.')
+    if (amount <= 0) return setError('Poné el monto que te pagaron.')
+    const isPayout = payoutDraft.kind === 'payout'
+    if (isPayout && payoutDraft.from && payoutDraft.to && payoutDraft.from > payoutDraft.to) return setError('El período termina antes de empezar.')
+    const hours = parseAmount(payoutDraft.hours)
+    const fee = parseAmount(payoutDraft.fee)
+    const client = clients.find((c) => c.id === payoutDraft.clientId)
+    setPayments((cur) => [...cur, {
+      id: uid(), projectId: null, clientId: payoutDraft.clientId, kind: payoutDraft.kind, amount, paid: true, date: payoutDraft.date || dateKey(),
+      label: payoutDraft.label.trim() || (isPayout ? `Pago ${client?.name ?? ''}`.trim() : 'Bonus'),
+      ...(payoutDraft.method ? { method: payoutDraft.method } : {}),
+      ...(fee > 0 ? { fee } : {}),
+      ...(isPayout && hours > 0 ? { hours } : {}),
+      ...(isPayout && payoutDraft.from ? { from: payoutDraft.from } : {}),
+      ...(isPayout && payoutDraft.to ? { to: payoutDraft.to } : {}),
+    }])
+    setPayoutDraft(null)
+    setError('')
+  }
+
+  /** Paquete de evidencia para reclamar: Task IDs, inicios y fin, horas tuyas vs. pagadas, sin memos. */
+  function exportEvidence(client: Client, row: ReconRow) {
+    const md = evidenceMarkdown(client.name, row, tasks.filter((t) => (t.projectId ? projects.some((p) => p.id === t.projectId && p.clientId === client.id) : t.client === client.name)))
+    download(`evidencia-${slug(client.name)}-${row.to}.md`, md, 'text/markdown;charset=utf-8')
   }
 
   const q = query.trim().toLowerCase()
@@ -327,10 +376,25 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
       <div className="view-heading">
         <div><h2>Plataformas</h2><p className="view-sub">Cada plataforma (Outlier, LinkedIn, Upwork…) tiene su etapa y sus proyectos, cada uno con su tarifa por hora y sus links (Slack, Meet, manuales). En <b>Personal</b> va lo tuyo, sin plataforma: suma tiempo, no plata.</p></div>
         <div className="heading-actions">
+          <button className="ghost-button" onClick={() => newPayout((clients.find((c) => clientStatus(c) === 'activo') ?? clients[0])?.id ?? '')} disabled={clients.length === 0} title="Anotá lo que una plataforma te pagó (Airtm, PayPal…) para compararlo con tus horas"><Landmark /> Registrar pago</button>
           <button className="ghost-button" onClick={() => newProject('', PALETTE[projects.length % PALETTE.length])}><FolderPlus /> Nuevo proyecto</button>
           <button className="primary-button" onClick={newClient}><UserPlus /> Nueva plataforma</button>
         </div>
       </div>
+
+      {(() => {
+        const shares = concentration(clients, projects, tasks, payments, dateKey(), 90)
+        const top = shares[0]
+        if (!top || shares.length === 0) return null
+        const risky = top.pct > CONCENTRATION_LIMIT
+        return (
+          <div className={`concentration ${risky ? 'is-risky' : ''}`}>
+            <div className="concentration-head">{risky ? <AlertTriangle /> : null}<span>{risky ? <><b>{top.pct}%</b> de lo que ganaste en 90 días viene de <b>{top.name}</b>. Si se cae, se cae casi todo: sumá otra plataforma.</> : 'De dónde sale tu plata (últimos 90 días)'}</span></div>
+            <div className="concentration-bar" role="img" aria-label={shares.map((x) => `${x.name} ${x.pct}%`).join(', ')}>{shares.map((x) => <i key={x.id} style={{ width: `${x.pct}%`, background: x.color }} title={`${x.name} ${x.pct}%`} />)}</div>
+            <div className="concentration-legend">{shares.map((x) => <span key={x.id}><i className="dot" style={{ background: x.color }} /> {x.name} <b>{x.pct}%</b> <small>US$ {fmtShort(Math.round(x.amount))}</small></span>)}</div>
+          </div>
+        )
+      })()}
 
       <div className="clients-toolbar">
         <div className="segmented small" role="tablist" aria-label="Vista">
@@ -402,11 +466,14 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
       {sheet && (() => {
         const tot = clientTotals(sheet)
         const status = clientStatus(sheet)
+        const fin = platformFinance(sheet, projects, tasks, payments)
+        const recon = reconcile(sheet, projects, tasks, payments)
         const month = dateKey().slice(0, 7)
         const monthSecs = tot.tasks.filter((t) => t.date.startsWith(month)).reduce((s, t) => s + t.seconds, 0)
         const recentTasks = [...tot.tasks].sort((a, b) => (b.date + (b.start ?? '')).localeCompare(a.date + (a.start ?? '')) || b.id - a.id)
         const last = recentTasks[0]?.date
         const first = [...tot.tasks].sort((a, b) => a.date.localeCompare(b.date))[0]?.date
+        const received = payments.filter((x) => x.paid && x.projectId === null && paymentClientId(x, projects) === sheet.id).sort((a, b) => b.date.localeCompare(a.date))
         return (
           <div className="modal-backdrop" onClick={() => setSheetId(null)}>
             <div className="modal-card wide client-sheet" onClick={(e) => e.stopPropagation()}>
@@ -420,13 +487,18 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
                 <div><dt>Etapa</dt><dd>{STATUSES.find((s) => s.id === status)!.help}</dd></div>
                 <div><dt>En la plataforma desde</dt><dd>{sheet.since ? fmtDate(sheet.since) : first ? fmtDate(first) : <span className="muted">—</span>}</dd></div>
                 <div><dt>Última vez que taskeaste</dt><dd>{last ? fmtDate(last) : <span className="muted">Nunca</span>}</dd></div>
+                <div><dt>Cómo te pagan</dt><dd>{[sheet.payDay, sheet.payMethod, sheet.payer ? `figura como “${sheet.payer}”` : ''].filter(Boolean).join(' · ') || <span className="muted">Sin cargar: editá la plataforma</span>}</dd></div>
               </dl>
 
               <div className="sheet-stats">
                 <div><span>Horas totales</span><strong>{fmtHours(tot.seconds)}</strong></div>
                 <div><span>Este mes</span><strong>{fmtHours(monthSecs)}</strong></div>
-                <div><span>Ganado</span><strong>US$ {fmtShort(Math.round(tot.amount * 100) / 100)}</strong></div>
-                <div><span>Por cobrar</span><strong>US$ {fmtShort(Math.round(tot.pending * 100) / 100)}</strong></div>
+                <div title="Horas × tarifa, más cobros de presupuesto y bonus"><span>Ganado (estimado)</span><strong>US$ {fmtShort(Math.round(tot.amount * 100) / 100)}</strong></div>
+                <div title="Lo que la plataforma te pagó de verdad"><span>Cobrado</span><strong>US$ {fmtShort(fin.collected)}</strong></div>
+                <div title="Lo ganado ÷ todas las horas en la plataforma, también las que no pagan"><span>Tarifa efectiva{fin.effectiveRate > 0 && !fin.effectiveIsReal ? ' (est.)' : ''}</span><strong>{fin.effectiveRate > 0 ? `US$ ${fmtShort(fin.effectiveRate)}/h` : '—'}</strong></div>
+                <div title="Tiempo no facturable: assessments, onboarding sin pago, esperas de tareas"><span>Tiempo sin pago</span><strong>{fmtHours(fin.unpaidSeconds)}</strong></div>
+                <div title="Horas trabajadas después del último pago registrado"><span>Esperando pago</span><strong>{fin.awaiting > 0 ? `US$ ${fmtShort(fin.awaiting)}` : '—'}</strong></div>
+                <div><span>Por cobrar (presupuestos)</span><strong>US$ {fmtShort(Math.round(tot.pending * 100) / 100)}</strong></div>
               </div>
 
               {(sheet.links?.length || sheet.notes) ? <div className="sheet-section">
@@ -442,6 +514,25 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
                   const st = statusOf(p)
                   return <div className="sheet-row" key={p.id}><i className="dot" style={{ background: p.color }} /><span>{p.name}</span>{st !== 'activo' && <span className={`status-pill status-${st}`}>{PROJECT_STATUSES.find((x) => x.id === st)!.label}</span>}<small>{fmtHours(pt.seconds)} · US$ {fmtShort(Math.round(pt.amount * 100) / 100)}</small><button className="icon-button" onClick={() => editProject(p)} aria-label={`Editar ${p.name}`} title="Editar proyecto"><Pencil /></button></div>
                 })}
+              </div>
+
+              <div className="sheet-section">
+                <h4>Pagos recibidos <small>{received.length}</small></h4>
+                {received.length === 0 && <p className="muted-line">Todavía no registraste pagos de esta plataforma. Anotalos para comparar lo que te pagaron con tus horas.</p>}
+                {recon.length > 0 && <div className="recon">
+                  <div className="recon-row recon-head"><span>Período</span><span>Tus horas</span><span>Estimado</span><span>Pagado</span><span>Diferencia</span><span /></div>
+                  {[...recon].reverse().map((r) => <div className="recon-row" key={r.payment.id}>
+                    <span>{r.from ? `${fmtDate(r.from)} → ` : 'hasta '}{fmtDate(r.to)}</span>
+                    <span>{fmtHours(r.seconds)}{r.paidHours !== null && <small> · pagaron {r.paidHours}h</small>}</span>
+                    <span>US$ {fmtMoney(r.estimated)}</span>
+                    <span>US$ {fmtMoney(r.paid)}</span>
+                    <span className={Math.abs(r.diffPct) >= 5 && r.estimated > 0 ? (r.diff < 0 ? 'diff-bad' : 'diff-good') : 'diff-ok'}>{r.estimated > 0 ? `${r.diff >= 0 ? '+' : '−'}${fmtMoney(Math.abs(r.diff))} (${r.diffPct > 0 ? '+' : ''}${r.diffPct}%)` : '—'}</span>
+                    <button className="icon-button" onClick={() => exportEvidence(sheet, r)} aria-label="Descargar evidencia para reclamar" title="Evidencia para reclamar: Task IDs, inicios y fin, sin memos"><FileText /></button>
+                  </div>)}
+                </div>}
+                {received.map((x) => <div className="sheet-row" key={x.id}><span>{x.label}<em>{PAYMENT_KIND_LABEL[paymentKind(x)]}{x.method ? ` · ${x.method}` : ''}{x.fee ? ` · comisión US$ ${fmtMoney(x.fee)}` : ''}</em></span><small>{fmtDate(x.date)} · <b>US$ {fmtMoney(x.amount)}</b></small><button className="icon-button danger" onClick={() => window.confirm(`¿Borrar “${x.label}”?`) && setPayments((cur) => cur.filter((y) => y.id !== x.id))} aria-label="Borrar pago"><X /></button></div>)}
+                <button className="text-button" onClick={() => newPayout(sheet.id)}><Plus /> Registrar pago recibido</button>
+                <button className="text-button" onClick={() => newPayout(sheet.id, 'bonus')}><Plus /> Registrar bonus / rewards</button>
               </div>
 
               <div className="sheet-section">
@@ -470,6 +561,14 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
               <label>Nombre<input autoFocus value={clientDraft.name} onChange={(e) => setClientDraft({ ...clientDraft, name: e.target.value })} placeholder="Ej. Outlier, Upwork, LinkedIn" /></label>
               <div className="field"><span>Etapa</span><div className="segmented small wrap">{STATUSES.map((s) => <button type="button" key={s.id} title={s.help} className={clientStatus(clientDraft) === s.id ? 'seg-on' : ''} onClick={() => setClientDraft({ ...clientDraft, status: s.id })}>{s.label}</button>)}</div><small className="field-help">{STATUSES.find((s) => s.id === clientStatus(clientDraft))!.help}</small></div>
               <label>En la plataforma desde<input type="date" value={clientDraft.since} onChange={(e) => setClientDraft({ ...clientDraft, since: e.target.value })} /></label>
+              <div className="field"><span>Cómo te pagan</span>
+                <div className="modal-fields two">
+                  <select value={clientDraft.payMethod} onChange={(e) => setClientDraft({ ...clientDraft, payMethod: e.target.value })} aria-label="Método de pago"><option value="">Método…</option>{PAY_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+                  <input value={clientDraft.payDay} onChange={(e) => setClientDraft({ ...clientDraft, payDay: e.target.value })} placeholder="Cuándo: martes a la noche (PT)" aria-label="Cuándo pagan" />
+                </div>
+                <input value={clientDraft.payer} onChange={(e) => setClientDraft({ ...clientDraft, payer: e.target.value })} placeholder="Nombre con el que aparece el pago (ej. Scale AI, Inc.)" aria-label="Nombre del pagador" />
+                <small className="field-help">Así reconocés el pago en Airtm o tu banco y sabés quién te lo hizo.</small>
+              </div>
               <LinksEditor links={clientDraft.links} onChange={(links) => setClientDraft({ ...clientDraft, links })} urlPlaceholder="app.outlier.ai" />
               <label>Notas<textarea rows={3} value={clientDraft.notes} onChange={(e) => setClientDraft({ ...clientDraft, notes: e.target.value })} placeholder="Cuándo pagan, requisitos, próximos pasos…" /></label>
               <div className="field"><span>Color</span><div className="swatches">{PALETTE.map((col) => <button type="button" key={col} className={clientDraft.color === col ? 'swatch-on' : ''} style={{ background: col }} onClick={() => setClientDraft({ ...clientDraft, color: col })} aria-label={`Color ${col}`} />)}</div></div>
@@ -503,6 +602,41 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
             </div>
             {error && <p className="form-error">{error}</p>}
             <div className="modal-actions"><button className="ghost-button" onClick={() => setProjectDraft(null)}>Cancelar</button><button className="primary-button" onClick={saveProject}>Guardar proyecto</button></div>
+          </div>
+        </div>
+      )}
+
+      {payoutDraft && (
+        <div className="modal-backdrop" onClick={() => setPayoutDraft(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setPayoutDraft(null)} aria-label="Cerrar"><X /></button>
+            <h2>Registrar pago recibido</h2>
+            <p>Lo que la plataforma te pagó de verdad. Trakker lo compara con tus horas del período.</p>
+            <div className="form-grid">
+              <div className="modal-fields two">
+                <label>Plataforma<select value={payoutDraft.clientId} onChange={(e) => setPayoutDraft({ ...payoutDraft, clientId: e.target.value, method: clients.find((c) => c.id === e.target.value)?.payMethod ?? payoutDraft.method })}>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+                <div className="field"><span>Tipo</span><div className="segmented small">{(['payout', 'bonus'] as const).map((k) => <button type="button" key={k} className={payoutDraft.kind === k ? 'seg-on' : ''} onClick={() => setPayoutDraft({ ...payoutDraft, kind: k })}>{k === 'payout' ? 'Horas' : 'Bonus'}</button>)}</div></div>
+              </div>
+              <div className="modal-fields two">
+                <label>Monto<span className="rate-input"><span>US$</span><input autoFocus inputMode="decimal" value={payoutDraft.amount} onChange={(e) => setPayoutDraft({ ...payoutDraft, amount: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && savePayout()} placeholder="0" /></span></label>
+                <label>Fecha del pago<input type="date" value={payoutDraft.date} onChange={(e) => setPayoutDraft({ ...payoutDraft, date: e.target.value })} /></label>
+              </div>
+              {payoutDraft.kind === 'payout' && <>
+                <div className="modal-fields three">
+                  <label>Horas que pagaron<input inputMode="decimal" value={payoutDraft.hours} onChange={(e) => setPayoutDraft({ ...payoutDraft, hours: e.target.value })} placeholder="Opcional" /></label>
+                  <label>Período desde<input type="date" value={payoutDraft.from} onChange={(e) => setPayoutDraft({ ...payoutDraft, from: e.target.value })} /></label>
+                  <label>Hasta<input type="date" value={payoutDraft.to} onChange={(e) => setPayoutDraft({ ...payoutDraft, to: e.target.value })} /></label>
+                </div>
+                <small className="field-help">El período es el trabajo que cubre este pago. Si lo dejás vacío, empieza donde terminó el pago anterior.</small>
+              </>}
+              <div className="modal-fields two">
+                <label>Método<select value={payoutDraft.method} onChange={(e) => setPayoutDraft({ ...payoutDraft, method: e.target.value })}><option value="">—</option>{PAY_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}</select></label>
+                <label>Comisión<span className="rate-input"><span>US$</span><input inputMode="decimal" value={payoutDraft.fee} onChange={(e) => setPayoutDraft({ ...payoutDraft, fee: e.target.value })} placeholder="Opcional" /></span></label>
+              </div>
+              <label>Concepto<input value={payoutDraft.label} onChange={(e) => setPayoutDraft({ ...payoutDraft, label: e.target.value })} placeholder={payoutDraft.kind === 'bonus' ? 'Rewards de misión' : 'Pago semanal'} /></label>
+            </div>
+            {error && <p className="form-error">{error}</p>}
+            <div className="modal-actions"><button className="ghost-button" onClick={() => setPayoutDraft(null)}>Cancelar</button><button className="primary-button" onClick={savePayout}>Guardar pago</button></div>
           </div>
         </div>
       )}

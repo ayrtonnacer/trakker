@@ -1,9 +1,10 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Clock3, DollarSign, Gauge } from 'lucide-react'
-import { dateKey, fmtHours, fmtMoney, fmtShort, goalTarget, type Client, type Goal, type Payment, type Project, type Task } from '@/lib/game'
+import { ChevronLeft, ChevronRight, Clock3, DollarSign, Gauge, Landmark, Timer } from 'lucide-react'
+import { dateKey, fmtHours, fmtMoney, fmtShort, goalTarget, paymentClientId, type Client, type Goal, type Payment, type Project, type Task } from '@/lib/game'
 import { GoalPanel } from './goal-panel'
+import { effectiveRate } from '@/lib/finance'
 import { PERIODS, buildEntries, computeStats, groupEntries, type Bin, type GroupBy, type Period } from '@/lib/stats'
 
 const GROUPS: { id: GroupBy; label: string }[] = [
@@ -76,6 +77,14 @@ export function StatsView({ tasks, payments, projects, clients, goal, setGoal, t
   const clientColors = useMemo(() => new Map(clients.map((c) => [c.name, c.color])), [clients])
   const filtered = useMemo(() => all.filter((t) => (!clientFilter || t.client === clientFilter) && (!billableOnly || t.billable)), [all, clientFilter, billableOnly])
   const s = useMemo(() => computeStats(filtered, period, offset, today), [filtered, period, offset, today])
+  // Lo que de verdad te pagaron en el período (por horas, cobros y bonus), a diferencia de lo ganado, que es estimado.
+  const collected = useMemo(() => {
+    const from = dateKey(s.range.from)
+    const to = dateKey(s.range.to)
+    const nameOf = (p: Payment) => clients.find((c) => c.id === paymentClientId(p, projects))?.name ?? ''
+    const list = payments.filter((p) => p.paid && p.date >= from && p.date <= to && (!clientFilter || nameOf(p) === clientFilter))
+    return { gross: list.reduce((a, p) => a + p.amount, 0), fees: list.reduce((a, p) => a + (p.fee ?? 0), 0), count: list.length }
+  }, [payments, projects, clients, s.range, clientFilter])
   const groups = useMemo(() => {
     const gs = groupEntries(s.entries, groupBy, clientColors)
     return gs.filter((g) => g.seconds > 0 || g.amount > 0).sort((x, y) => y.amount - x.amount || y.seconds - x.seconds)
@@ -91,10 +100,10 @@ export function StatsView({ tasks, payments, projects, clients, goal, setGoal, t
   return (
     <section className="view">
       <div className="view-heading">
-        <div><h2>Estadísticas</h2><p className="view-sub">Tiempo y plata por día, mes, plataforma y proyecto. Los cobros de proyectos con presupuesto se suman en la fecha en que los cobraste.</p></div>
+        <div><h2>Estadísticas</h2><p className="view-sub">Tiempo y plata por día, mes, plataforma y proyecto. <b>Ganado</b> es lo estimado (horas × tarifa + cobros y bonus); <b>Cobrado</b> es lo que te pagaron de verdad.</p></div>
       </div>
 
-      <GoalPanel goal={goal} setGoal={setGoal} tasks={tasks} payments={payments} today={today} />
+      <GoalPanel goal={goal} setGoal={setGoal} tasks={tasks} payments={payments} today={today} hourRate={effectiveRate(projects, tasks, payments, today, 90)} />
 
       <div className="stats-toolbar">
         <div className="segmented wrap" role="tablist" aria-label="Período">
@@ -111,10 +120,12 @@ export function StatsView({ tasks, payments, projects, clients, goal, setGoal, t
         </div>
       </div>
 
-      <div className="summary-grid">
+      <div className="summary-grid four">
         <div className="summary-card"><span><Clock3 /> Horas</span><strong>{fmtHours(s.seconds)}</strong><small>{fmtHours(s.avgDaily)} por día · {s.workedDays} día{s.workedDays === 1 ? '' : 's'} con trabajo · {s.billablePct}% facturable</small></div>
-        <div className="summary-card"><span><DollarSign /> Ganado</span><strong>US$ {fmtMoney(s.amount)}</strong><small>US$ {fmtMoney(s.avgDailyAmount)} por día · {s.paymentsAmount > 0 ? `incluye US$ ${fmtMoney(s.paymentsAmount)} en pagos` : 'por horas facturadas'}</small></div>
-        <div className="summary-card" title="En proyectos por presupuesto o entrega se usa lo cobrado ÷ las horas del proyecto, así el valor no salta según cuándo te pagan."><span><Gauge /> Valor de tu hora</span><strong>{s.perHour > 0 ? `US$ ${fmtMoney(s.perHour)}` : '—'}</strong><small>ganado ÷ horas facturables{s.perHour > 0 ? '' : ' (todavía sin horas cobradas)'}</small></div>
+        <div className="summary-card"><span><DollarSign /> Ganado (estimado)</span><strong>US$ {fmtMoney(s.amount)}</strong><small>US$ {fmtMoney(s.avgDailyAmount)} por día · {s.paymentsAmount > 0 ? `incluye US$ ${fmtMoney(s.paymentsAmount)} en pagos` : 'por horas facturadas'}</small></div>
+        <div className="summary-card" title="Lo que las plataformas te pagaron de verdad en este período. Se carga desde Plataformas → Registrar pago."><span><Landmark /> Cobrado</span><strong>US$ {fmtMoney(collected.gross)}</strong><small>{collected.count === 0 ? 'Todavía no registraste pagos en este período' : <>{collected.count} pago{collected.count === 1 ? '' : 's'}{collected.fees > 0 ? ` · comisiones US$ ${fmtMoney(collected.fees)} · neto US$ ${fmtMoney(collected.gross - collected.fees)}` : ''}{s.amount > 0 ? ` · ${collected.gross >= s.amount ? '+' : '−'}US$ ${fmtMoney(Math.abs(collected.gross - s.amount))} vs. estimado` : ''}</>}</small></div>
+        <div className="summary-card" title="Lo ganado en plataformas ÷ TODAS las horas que pasaste en ellas, incluido el tiempo no facturable (assessments, onboarding sin pago, esperas)."><span><Timer /> Tarifa efectiva</span><strong>{s.effectiveRate > 0 ? `US$ ${fmtMoney(s.effectiveRate)}/h` : '—'}</strong><small>{s.unpaidSeconds > 0 ? `incluye ${fmtHours(s.unpaidSeconds)} sin pago` : 'todo el tiempo en plataformas'}{s.perHour > 0 && s.effectiveRate > 0 && s.perHour - s.effectiveRate > 0.005 ? ` · tu hora facturable rinde US$ ${fmtMoney(s.perHour)}` : ''}</small></div>
+        <div className="summary-card" title="En proyectos por presupuesto o entrega se usa lo cobrado ÷ las horas del proyecto, así el valor no salta según cuándo te pagan."><span><Gauge /> Valor de tu hora</span><strong>{s.perHour > 0 ? `US$ ${fmtMoney(s.perHour)}` : '—'}</strong><small>ganado ÷ horas facturables{s.perHour > 0 ? ' (sin contar el tiempo no pago)' : ' (todavía sin horas cobradas)'}</small></div>
       </div>
 
       <div className="stats-grid even">

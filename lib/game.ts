@@ -33,7 +33,11 @@ export function clientStatus(c: { status?: ClientStatus } | null | undefined): S
 /** Días sin taskear a partir de los que una plataforma activa se sugiere como en pausa. */
 export const IDLE_DAYS = 14
 
-export type Client = { id: string; name: string; color: string; links?: Link[]; notes?: string; status?: ClientStatus; contact?: string; email?: string; since?: string }
+/** Plataforma. payer = nombre con que aparece el pago (ej. Outlier paga como “Scale AI, Inc.”); payDay = cuándo pagan. */
+export type Client = { id: string; name: string; color: string; links?: Link[]; notes?: string; status?: ClientStatus; contact?: string; email?: string; since?: string; payer?: string; payMethod?: string; payDay?: string }
+
+/** Cómo te llega la plata: se usa para sugerir el método al registrar un pago. */
+export const PAY_METHODS = ['Airtm', 'PayPal', 'Payoneer', 'Wise', 'Transferencia', 'Otro']
 
 export type LinkKind = 'slack' | 'meet' | 'doc' | 'manual' | 'pago' | 'plataforma' | 'otro'
 
@@ -73,8 +77,43 @@ export type ProjectStatus = 'activo' | 'pausado' | 'terminado'
 /** Proyecto. clientId null = sin cliente. rate = USD/h (hora) o USD por entrega (entrega). price = total (fijo). */
 export type Project = { id: string; name: string; clientId: string | null; rate: number; color: string; billing?: Billing; price?: number; status?: ProjectStatus; links?: Link[] }
 
-/** Plata cobrada (o por cobrar) que no sale de las horas: adelantos, hitos, entregas. */
-export type Payment = { id: string; projectId: string | null; label: string; amount: number; date: string; paid: boolean }
+/**
+ * - cobro: adelanto, hito o entrega de un proyecto por presupuesto o entrega (suma a lo ganado y a lo cobrado).
+ * - payout: lo que la plataforma te pagó por horas. Las horas ya suman a lo ganado: acá sólo cuenta como cobrado.
+ * - bonus: premios y misiones (ej. Outlier Rewards): suma a lo ganado y a lo cobrado.
+ */
+export type PaymentKind = 'cobro' | 'payout' | 'bonus'
+
+/**
+ * Plata cobrada (o por cobrar) que no sale de las horas. Un payout o bonus de plataforma lleva clientId;
+ * from/to es el período de trabajo que cubre, hours lo que la plataforma dice que pagó y fee la comisión del método.
+ */
+export type Payment = {
+  id: string
+  projectId: string | null
+  label: string
+  amount: number
+  date: string
+  paid: boolean
+  clientId?: string | null
+  kind?: PaymentKind
+  method?: string
+  fee?: number
+  hours?: number
+  from?: string
+  to?: string
+}
+
+export const PAYMENT_KIND_LABEL: Record<PaymentKind, string> = { cobro: 'Cobro', payout: 'Pago por horas', bonus: 'Bonus' }
+
+export function paymentKind(p: Payment): PaymentKind {
+  return p.kind ?? 'cobro'
+}
+
+/** La plataforma a la que pertenece un pago: la suya o la del proyecto. */
+export function paymentClientId(p: Payment, projects: Project[]) {
+  return p.clientId ?? projects.find((x) => x.id === p.projectId)?.clientId ?? null
+}
 
 export type Task = {
   id: number
@@ -99,8 +138,11 @@ export type Task = {
 
 export type Action = { id: string; text: string; done: boolean }
 
-/** Meta de ingresos: subir `pct`% sobre `baseline` (USD/mes) en `months` meses desde `start` (AAAA-MM). */
-export type Goal = { baseline: number; pct: number; months: number; start: string; milestones: number[]; actions: Action[] }
+/**
+ * Meta de ingresos: subir `pct`% sobre `baseline` (USD/mes) en `months` meses desde `start` (AAAA-MM).
+ * Si hay `fixed`, la meta es un monto fijo por mes (ej. 5.000 USD) desde `start` y `pct` no se usa.
+ */
+export type Goal = { baseline: number; pct: number; months: number; start: string; milestones: number[]; actions: Action[]; fixed?: number }
 
 /** date vacío = backlog: tarea pendiente sin día asignado. */
 export type PlanItem = { id: string; date: string; text: string; projectId: string | null; hours: number; done: boolean; note?: string }
@@ -307,11 +349,16 @@ export function migrateProject(p: Project): Project {
   return p.clientId ? p : { ...p, billing: 'interno', rate: 0, price: 0 }
 }
 
-/** Total cobrado (horas + pagos) en el mes AAAA-MM. */
+/** Lo ganado (estimado) en el mes AAAA-MM: horas × tarifa + cobros y bonus. Los payouts no suman: sus horas ya están. */
 export function monthEarnings(month: string, tasks: Task[], payments: Payment[]) {
   const fromTasks = tasks.filter((t) => t.date.startsWith(month)).reduce((s, t) => s + t.amount, 0)
-  const fromPayments = payments.filter((p) => p.paid && p.date.startsWith(month)).reduce((s, p) => s + p.amount, 0)
+  const fromPayments = payments.filter((p) => p.paid && paymentKind(p) !== 'payout' && p.date.startsWith(month)).reduce((s, p) => s + p.amount, 0)
   return Math.round((fromTasks + fromPayments) * 100) / 100
+}
+
+/** Lo que de verdad te pagaron en el mes AAAA-MM (bruto, antes de la comisión del método). */
+export function monthCollected(month: string, payments: Payment[]) {
+  return Math.round(payments.filter((p) => p.paid && p.date.startsWith(month)).reduce((s, p) => s + p.amount, 0) * 100) / 100
 }
 
 export function addMonths(month: string, n: number) {
@@ -338,9 +385,10 @@ export function suggestedBaseline(month: string, tasks: Task[], payments: Paymen
  * en el último mes del plan. Antes del plan no hay objetivo; después se mantiene el final.
  */
 export function goalTarget(goal: Goal | null, month: string) {
-  if (!goal || goal.baseline <= 0) return 0
+  if (!goal || (goal.baseline <= 0 && !(goal.fixed && goal.fixed > 0))) return 0
   const i = monthsBetween(goal.start, month) + 1
   if (i < 1) return 0
+  if (goal.fixed && goal.fixed > 0) return Math.round(goal.fixed)
   const step = Math.min(i, goal.months) / Math.max(1, goal.months)
   return Math.round(goal.baseline * (1 + (goal.pct / 100) * step))
 }
