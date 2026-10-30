@@ -206,7 +206,7 @@ export function useGitSync({ loaded, data, apply }: { loaded: boolean; data: App
 
   async function connect(c: SyncConfig) {
     const clean: SyncConfig = { repo: c.repo.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, ''), branch: c.branch.trim(), dir: c.dir.trim(), token: c.token.trim() }
-    if (!/^[\w.-]+\/[\w.-]+$/.test(clean.repo)) throw new Error('El repo tiene que ser usuario/repositorio, por ejemplo ayrtonnacer/trakker-datos.')
+    if (!/^[\w.-]+\/[\w.-]+$/.test(clean.repo)) throw new Error('El repo tiene que ser usuario/repositorio, por ejemplo ayrtonnacer/tasker-crm-datos.')
     if (!clean.token) throw new Error('Falta el token de GitHub.')
     set('connecting')
     try {

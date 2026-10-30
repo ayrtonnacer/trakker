@@ -34,6 +34,7 @@ import {
   type Routine,
   type Task,
 } from '@/lib/game'
+import { ActivityGrid } from '@/components/tracker/activity-grid'
 import { ClientsView } from '@/components/tracker/clients-view'
 import { PaymentsView } from '@/components/tracker/payments-view'
 import { LinkChip } from '@/components/tracker/link-chip'
@@ -70,26 +71,6 @@ type Piece = { id: number; x: number; y: number; r: number; d: number; s: number
 const DEFAULT_MODE: Mode = { down: false, minutes: 30 }
 const PRESET_MINUTES = [15, 25, 30, 45, 60]
 const EMPTY_DRAFT: Draft = { name: '', projectId: null, billable: false, tags: '', note: '' }
-
-function seedData(today: string) {
-  const clients: Client[] = [
-    { id: 'c-outlier', name: 'Outlier', color: '#2f6f9f', status: 'activo', links: [{ label: 'Plataforma', url: 'https://app.outlier.ai' }, { label: 'Pagos', url: 'https://app.outlier.ai/earnings' }], notes: '', payMethod: 'Airtm', payDay: 'Martes a la noche (hora del Pacífico)', payer: 'Scale AI, Inc.' },
-    { id: 'c-meridial', name: 'Meridial', color: '#d9730d', status: 'onboarding', links: [], notes: 'Onboarding pago por hora.' },
-    { id: 'c-upwork', name: 'Upwork', color: '#448361', status: 'aplicado', links: [{ label: 'Propuestas', url: 'https://www.upwork.com/nx/proposals' }], notes: '' },
-  ]
-  const projects: Project[] = [
-    { id: 'p-ai', name: 'AI trainer', clientId: 'c-outlier', rate: 20, color: '#2f6f9f', billing: 'hora' },
-    { id: 'p-onb', name: 'Onboarding', clientId: 'c-meridial', rate: 15, color: '#d9730d', billing: 'hora' },
-    { id: 'p-mio', name: 'Buscar trabajo', clientId: null, rate: 0, color: '#787774', billing: 'interno' },
-  ]
-  const payments: Payment[] = []
-  const tasks: Task[] = [
-    buildTask({ id: 1, name: 'Tareas de evaluación', ref: '65f6a8e1-839a-4a72-a42d-78fbb7f8feb6', seconds: 9000, projectId: 'p-ai', billable: true, tags: ['ai'], date: today, start: '09:00', projects, clients }),
-    buildTask({ id: 2, name: 'Curso de onboarding', seconds: 5400, projectId: 'p-onb', billable: true, tags: ['onboarding'], date: today, start: '12:00', projects, clients }),
-    buildTask({ id: 3, name: 'Mandar propuestas en Upwork', seconds: 2700, projectId: 'p-mio', billable: false, tags: ['búsqueda'], date: today, start: '15:00', projects, clients }),
-  ]
-  return { clients, projects, payments, tasks }
-}
 
 function minutesOf(hhmm: string) {
   const m = hhmm.match(/^(\d{1,2}):(\d{2})$/)
@@ -160,14 +141,13 @@ export default function Page() {
     setToday(key)
     setNow(Date.now())
     setLastBackup(readBackupTime())
-    const seed = seedData(key)
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY)
       if (raw) {
         const saved = JSON.parse(raw)
         setTasks((saved.tasks ?? []).map(migrateTask))
-        setClients(saved.clients ?? seed.clients)
-        setProjects((saved.projects ?? seed.projects).map(migrateProject))
+        setClients(saved.clients ?? [])
+        setProjects((saved.projects ?? []).map(migrateProject))
         setPayments(saved.payments ?? [])
         setGoal(saved.goal ?? null)
         setPlan(saved.plan ?? [])
@@ -175,17 +155,9 @@ export default function Page() {
         if (saved.active) setActive(saved.active)
         if (saved.draft) setDraft({ ...EMPTY_DRAFT, ...saved.draft })
         if (saved.mode) setMode({ ...DEFAULT_MODE, ...saved.mode })
-      } else {
-        setTasks(seed.tasks)
-        setClients(seed.clients)
-        setProjects(seed.projects)
-        setPayments(seed.payments)
       }
     } catch {
-      setTasks(seed.tasks)
-      setClients(seed.clients)
-      setProjects(seed.projects)
-      setPayments(seed.payments)
+      // Datos ilegibles: se arranca vacío.
     }
     setLoaded(true)
     // Si la app queda abierta pasada la medianoche, "hoy" se actualiza solo.
@@ -219,7 +191,7 @@ export default function Page() {
   const liveGold = draft.billable && draftCanBill && info.rate > 0 ? goldFor(elapsed, info.rate) : 0
 
   useEffect(() => {
-    document.title = running ? `${fmtClock(shown)} · ${draft.name || 'Tasker'}` : 'Tasker'
+    document.title = running ? `${fmtClock(shown)} · ${draft.name || 'Tasker CRM'}` : 'Tasker CRM'
   }, [running, shown, draft.name])
 
   const suggestedTags = useMemo(() => {
@@ -234,7 +206,9 @@ export default function Page() {
     const todaySeconds = todayTasks.reduce((s, t) => s + t.seconds, 0)
     const todayPaid = payments.filter((p) => p.paid && p.date === today).reduce((s, p) => s + p.amount, 0)
     const todayGold = todayTasks.reduce((s, t) => s + t.amount, 0) + todayPaid
-    const dates = new Set(tasks.map((t) => t.date))
+    const secsByDay = new Map<string, number>()
+    tasks.forEach((t) => secsByDay.set(t.date, (secsByDay.get(t.date) ?? 0) + t.seconds))
+    const dates = new Set(secsByDay.keys())
 
     const base = today ? new Date(`${today}T12:00:00`) : new Date(0)
     const monday = new Date(base)
@@ -250,7 +224,7 @@ export default function Page() {
     const month = today.slice(0, 7)
 
     return {
-      todaySeconds, todayGold, week, weekSeconds,
+      todaySeconds, todayGold, secsByDay, week, weekSeconds,
       weekMax: Math.max(3600, ...week.map((w) => w.secs)) * 1.1,
       weekDays: week.filter((w) => w.secs > 0).length,
       streak: streakFor(dates),
@@ -513,7 +487,7 @@ export default function Page() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand"><div className="brand-mark"><Pickaxe /></div><strong>Tasker</strong></div>
+        <div className="brand"><div className="brand-mark"><Pickaxe /></div><strong>Tasker CRM</strong></div>
         <nav className="desktop-nav" aria-label="Secciones">
           {TABS.map(({ id }) => <button key={id} className={activeTab === id ? 'nav-active' : ''} onClick={() => setActiveTab(id)}>{id}</button>)}
         </nav>
@@ -529,7 +503,7 @@ export default function Page() {
           {backupNag && (
             <div className="backup-reminder" role="status"><span><b>Tus datos viven solo en este navegador.</b> {lastBackup ? `Hace ${backupAgeDays(lastBackup)} días que no hacés un backup.` : 'Todavía no hiciste ningún backup.'}</span><button className="ghost-button" onClick={() => { downloadBackup(data); markBackup(); setLastBackup(Date.now()) }}>Descargar backup</button><button className="text-button" onClick={() => setSyncOpen(true)}>Guardar en GitHub</button></div>
           )}
-          <section className="welcome-row"><p className="eyebrow">{headerDate}</p><h1>Hola, Ayrton</h1></section>
+          <section className="welcome-row"><p className="eyebrow">{headerDate}</p><h1>Hola</h1></section>
 
           <section className={`timer-bar ${running ? 'is-running' : ''}`}>
             <div className="timer-name-wrap">
@@ -607,12 +581,7 @@ export default function Page() {
                 <Flame className="streak-flame" />
                 <div><strong>{streak}</strong><span>{streak === 1 ? 'día de racha' : 'días de racha'}</span></div>
               </div>
-              <div className="streak-week">
-                {stats.week.map((d) => {
-                  const done = d.secs > 0 || (d.isToday && elapsed > 0)
-                  return <span key={d.key} className={`${done ? 'done' : ''} ${d.isToday ? 'today' : ''} ${d.future ? 'future' : ''}`}><i>{done ? <Check /> : null}</i>{d.letter}</span>
-                })}
-              </div>
+              <ActivityGrid secsByDay={stats.secsByDay} today={today} liveSecs={elapsed} />
               <div className="card-foot"><span>{workedToday ? <>Hoy <b>{fmtHours(stats.todaySeconds + elapsed)}</b></> : streak > 0 ? 'Registrá algo hoy para no perder la racha' : 'Registrá una tarea para empezar tu racha'}</span></div>
             </article>
           </section>

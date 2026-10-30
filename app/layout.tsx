@@ -3,7 +3,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Tasker',
+  title: 'Tasker CRM',
   description: 'Registro de tiempo, ingresos, clientes y metas para freelancers y taskers.',
   generator: 'v0.app',
   icons: { icon: '/icon.svg', apple: '/icon.svg' },

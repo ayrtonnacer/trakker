@@ -69,7 +69,7 @@ export function PaymentForm({ clients, projects, payments, start, onSave, onClos
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose} aria-label="Cerrar"><X /></button>
         <h2>{editing ? 'Editar pago' : 'Registrar pago'}</h2>
-        <p>La plata que te llegó de verdad. Trakker la compara con lo que estimó por tus horas.</p>
+        <p>La plata que te llegó de verdad. Tasker CRM la compara con lo que estimó por tus horas.</p>
         <div className="form-grid">
           {project
             ? <label>Proyecto<input value={project.name} disabled /></label>
@@ -192,7 +192,7 @@ export function PaymentsView({ clients, projects, payments, setPayments, today }
   return (
     <section className="view">
       <div className="view-heading">
-        <div><h2>Pagos</h2><p className="view-sub">La plata que de verdad te llegó. Con esto Trakker compara lo cobrado contra lo que estimó por tus horas y te avisa si te pagaron de menos.</p></div>
+        <div><h2>Pagos</h2><p className="view-sub">La plata que de verdad te llegó. Con esto Tasker CRM compara lo cobrado contra lo que estimó por tus horas y te avisa si te pagaron de menos.</p></div>
         <div className="heading-actions">
           <button className="ghost-button" onClick={() => setBulk(true)} disabled={clients.length === 0}><ClipboardPaste /> Carga masiva</button>
           <button className="primary-button" onClick={() => setForm({ clientId: defaultClientId(clients, payments) })} disabled={clients.length === 0}><Plus /> Registrar pago</button>

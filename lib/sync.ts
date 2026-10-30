@@ -1,5 +1,5 @@
 // Sincronización con un repo de GitHub: los datos viven como archivos .md.
-// Cada archivo tiene una tabla legible y, al final, un bloque <!-- trakker:data --> con
+// Cada archivo tiene una tabla legible y, al final, un bloque <!-- tasker:data --> con
 // el dato exacto: ese bloque es la fuente de verdad al leer. Editar la tabla a mano no
 // cambia nada; para corregir algo, usá la app (o editá el bloque de datos).
 import { PAYMENT_KIND_LABEL, clientStatus, fmtClock, fmtMoney, paymentClientId, paymentKind, type Client, type Goal, type Payment, type PlanItem, type Project, type Routine, type Task } from './game'
@@ -31,10 +31,11 @@ const safe = (json: string) => json.replace(/</g, '\\u003c').replace(/>/g, '\\u0
 const sortKeys = (_k: string, v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([x], [y]) => x.localeCompare(y))) : v)
 const json = (v: unknown) => safe(JSON.stringify(v, sortKeys))
 const lines = (items: unknown[]) => (items.length ? `[\n${items.map(json).join(',\n')}\n]` : '[]')
-const block = (json: string) => `<!-- trakker:data\n${json}\n-->\n`
+const block = (json: string) => `<!-- tasker:data\n${json}\n-->\n`
 
 function readBlock(text: string) {
-  const m = text.match(/<!-- trakker:data\r?\n([\s\S]*?)\r?\n-->/)
+  // Los repos creados cuando la app se llamaba Trakker usan el marcador viejo: se siguen leyendo.
+  const m = text.match(/<!-- (?:tasker|trakker):data\r?\n([\s\S]*?)\r?\n-->/)
   if (!m) return null
   try {
     return JSON.parse(m[1])
@@ -113,7 +114,7 @@ export function serialize(d: AppData): Record<string, string> {
   return files
 }
 
-/** Lee los archivos del repo. `found` es false si no hay ningún dato de Tasker. */
+/** Lee los archivos del repo. `found` es false si no hay ningún dato de Tasker CRM. */
 export function parseFiles(files: Record<string, string>) {
   const data: Partial<AppData> = {}
   let found = false
@@ -268,8 +269,8 @@ export async function pushChanges(c: SyncConfig, changes: Change[], shas: Record
   for (const ch of changes) {
     const send = async (sha?: string) => {
       const body = ch.content === null
-        ? { message: `Tasker: borrar ${ch.path}`, sha, ...(c.branch.trim() ? { branch: c.branch.trim() } : {}) }
-        : { message: `Tasker: actualizar ${ch.path}`, content: b64encode(ch.content), sha, ...(c.branch.trim() ? { branch: c.branch.trim() } : {}) }
+        ? { message: `Tasker CRM: borrar ${ch.path}`, sha, ...(c.branch.trim() ? { branch: c.branch.trim() } : {}) }
+        : { message: `Tasker CRM: actualizar ${ch.path}`, content: b64encode(ch.content), sha, ...(c.branch.trim() ? { branch: c.branch.trim() } : {}) }
       return gh(c, url(c, ch.path), { method: ch.content === null ? 'DELETE' : 'PUT', body: JSON.stringify(body) })
     }
     if (ch.content === null && !shas[ch.path]) {

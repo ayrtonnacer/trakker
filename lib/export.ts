@@ -89,6 +89,6 @@ export function evidenceMarkdown(platform: string, row: ReconRow, tasks: Task[])
   out.push(`- Estimado a mi tarifa: **US$ ${fmtMoney(row.estimated)}** · Pagado: **US$ ${fmtMoney(row.paid)}** (${row.diff >= 0 ? '+' : '−'}US$ ${fmtMoney(Math.abs(row.diff))})`, '')
   out.push('| Fecha | Inicio | Fin | Duración | Task ID | Proyecto | Facturable |', '|---|---|---|---|---|---|---|')
   out.push(...list.map((t) => `| ${t.date} | ${t.start ?? ''} | ${endTime(t.start, t.seconds)} | ${fmtClock(t.seconds)} | ${t.ref ?? ''} | ${t.project} | ${t.billable ? 'sí' : 'no'} |`))
-  out.push('', 'Registro propio hecho con Trakker, tarea por tarea, con el Task ID de la plataforma.', '')
+  out.push('', 'Registro propio hecho con Tasker CRM, tarea por tarea, con el Task ID de la plataforma.', '')
   return out.join('\n')
 }

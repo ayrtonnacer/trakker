@@ -75,13 +75,13 @@ export function SyncModal({ cfg, status, message, lastSync, onConnect, onDisconn
         ) : (
           <>
             <ol className="sync-steps">
-              <li>Creá un repo <b>privado</b> vacío en GitHub, por ejemplo <code>trakker-datos</code>. Tiene tus ingresos y plataformas: no lo hagas público.</li>
+              <li>Creá un repo <b>privado</b> vacío en GitHub, por ejemplo <code>tasker-crm-datos</code>. Tiene tus ingresos y plataformas: no lo hagas público.</li>
               <li>En GitHub: Settings → Developer settings → Personal access tokens → <b>Fine-grained tokens</b> → Generate new token.</li>
               <li>En “Repository access” elegí <b>Only select repositories</b> y marcá solo ese repo. En Permissions → Repository permissions poné <b>Contents: Read and write</b>.</li>
               <li>Copiá el token y pegalo acá. Queda guardado solo en este navegador.</li>
             </ol>
             <div className="form-grid">
-              <label>Repo<input autoFocus value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} placeholder="usuario/trakker-datos" /></label>
+              <label>Repo<input autoFocus value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} placeholder="usuario/tasker-crm-datos" /></label>
               <label>Token de GitHub<input type="password" autoComplete="off" value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} placeholder="github_pat_…" /></label>
             </div>
             {(error || (status === 'error' && message)) && <p className="form-error">{error || message}</p>}
@@ -111,7 +111,7 @@ export function SyncModal({ cfg, status, message, lastSync, onConnect, onDisconn
           {backupMsg && <p role="status">{backupMsg}</p>}
         </div>
 
-        <p className="sync-note">Archivos: <code>clientes.md</code>, <code>metas.md</code> y <code>tareas/AAAA-MM.md</code>. Cada uno tiene una tabla para leer y, al final, un bloque <code>trakker:data</code> que es lo que la app lee. Para corregir algo, hacelo desde la app.</p>
+        <p className="sync-note">Archivos: <code>clientes.md</code>, <code>metas.md</code> y <code>tareas/AAAA-MM.md</code>. Cada uno tiene una tabla para leer y, al final, un bloque <code>tasker:data</code> que es lo que la app lee. Para corregir algo, hacelo desde la app.</p>
       </div>
     </div>
   )

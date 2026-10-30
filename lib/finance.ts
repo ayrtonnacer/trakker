@@ -55,7 +55,7 @@ export type ReconRow = {
   from: string
   to: string
   seconds: number // tus horas facturables del período
-  estimated: number // lo que calculó Trakker
+  estimated: number // lo que calculó Tasker CRM
   paid: number // lo que te pagó la plataforma
   paidHours: number | null // horas que dice la plataforma, si las anotaste
   diff: number // paid − estimated

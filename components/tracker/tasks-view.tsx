@@ -1,8 +1,9 @@
 'use client'
 
 import { useMemo, useRef, useState } from 'react'
-import { Check, Pencil, Play, Plus, Repeat, Search, StickyNote, Trash2, X } from 'lucide-react'
+import { CalendarDays, Check, List, Pencil, Play, Plus, Repeat, Search, StickyNote, Trash2, X } from 'lucide-react'
 import { PERSONAL, canBill, dateKey, fmtHours, fmtMoney, parseTags, uid, type Client, type PlanItem, type Project, type Routine, type Task } from '@/lib/game'
+import { CalendarView } from './calendar-view'
 import { ExportMenu } from './export-menu'
 import { ProjectPicker } from './project-picker'
 import { TaskRow } from './task-row'
@@ -82,6 +83,7 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [query, setQuery] = useState('')
   const [range, setRange] = useState<Range>('todo')
+  const [layout, setLayout] = useState<'lista' | 'calendario'>('lista')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [projectId, setProjectId] = useState('')
@@ -257,7 +259,11 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
       )}
 
       <div className="list-toolbar">
-        <label className="check-all"><input type="checkbox" checked={allVisibleSelected} onChange={() => toggleMany(ordered)} disabled={ordered.length === 0} /> Seleccionar todo</label>
+        <div className="segmented small" role="tablist" aria-label="Modo de vista">
+          <button role="tab" aria-selected={layout === 'lista'} className={layout === 'lista' ? 'seg-on' : ''} onClick={() => setLayout('lista')}><List /> Lista</button>
+          <button role="tab" aria-selected={layout === 'calendario'} className={layout === 'calendario' ? 'seg-on' : ''} onClick={() => setLayout('calendario')}><CalendarDays /> Calendario</button>
+        </div>
+        {layout === 'lista' && <label className="check-all"><input type="checkbox" checked={allVisibleSelected} onChange={() => toggleMany(ordered)} disabled={ordered.length === 0} /> Seleccionar todo</label>}
         <label className="search-input"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar tarea, Task ID, proyecto, plataforma o etiqueta" aria-label="Buscar" /></label>
       </div>
       <div className="task-filters">
@@ -269,8 +275,10 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
       </div>
       {filtering && visible.length > 0 && <p className="filter-total">{visible.length} tarea{visible.length === 1 ? '' : 's'} · <b>{fmtHours(totalSeconds)}</b>{totalAmount > 0 && <> · <b>US$ {fmtMoney(totalAmount)}</b></>}</p>}
 
-      {days.length === 0 && <p className="empty-list">{filtering ? 'No hay tareas con esos filtros.' : 'Todavía no registraste nada. Escribí una tarea en Inicio y tocá ▶.'}</p>}
-      {days.map((day) => {
+      {layout === 'calendario' && <CalendarView tasks={visible} projects={projects} today={today} onDelete={onDelete} onRepeat={onRepeat} onEdit={onEdit} onToggleBillable={onToggleBillable} />}
+
+      {layout === 'lista' && days.length === 0 && <p className="empty-list">{filtering ? 'No hay tareas con esos filtros.' : 'Todavía no registraste nada. Escribí una tarea en Inicio y tocá ▶.'}</p>}
+      {layout === 'lista' && days.map((day) => {
         const ts = byDay.get(day)!
         const secs = ts.reduce((s, t) => s + t.seconds, 0)
         const amount = ts.reduce((s, t) => s + t.amount, 0)
@@ -286,7 +294,7 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
         )
       })}
 
-      {chosen.length > 0 && (
+      {layout === 'lista' && chosen.length > 0 && (
         <div className="bulk-bar" role="toolbar" aria-label="Acciones sobre la selección">
           <strong>{chosen.length} seleccionada{chosen.length === 1 ? '' : 's'}</strong>
           <span className="bulk-meta">{fmtHours(selSeconds)}</span>
