@@ -14,6 +14,7 @@ import {
   fmtShort,
   goalTarget,
   goldFor,
+  PERSONAL,
   greetingFor,
   migrateProject,
   migrateTask,
@@ -46,7 +47,7 @@ import { TaskRow } from '@/components/tracker/task-row'
 import { TasksView, dayLabel } from '@/components/tracker/tasks-view'
 import { STATUS_LABEL, SyncModal } from '@/components/tracker/sync-modal'
 import { useGitSync } from '@/lib/use-sync'
-import { DEFAULT_FOCUS, treeStage, type Focus } from '@/lib/focus'
+import { DEFAULT_FOCUS, buildExtState, mergeDistractions, treeStage, type Distraction, type Focus } from '@/lib/focus'
 import { FocusModal } from '@/components/tracker/focus-modal'
 import type { AppData } from '@/lib/sync'
 import { BACKUP_REMINDER_DAYS, backupAgeDays, downloadBackup, markBackup, readBackupTime, parseBackup } from '@/lib/backup'
@@ -118,6 +119,7 @@ export default function Page() {
   const [focus, setFocus] = useState<Focus>(DEFAULT_FOCUS)
   const [focusOpen, setFocusOpen] = useState(false)
   const [extVersion, setExtVersion] = useState('')
+  const [distractions, setDistractions] = useState<Distraction[]>([])
   const [manual, setManual] = useState<Manual | null>(null)
   const [manualError, setManualError] = useState('')
   const [pieces, setPieces] = useState<Piece[]>([])
@@ -167,6 +169,7 @@ export default function Page() {
         if (saved.mode) setMode({ ...DEFAULT_MODE, ...saved.mode })
         if (typeof saved.userName === 'string') setUserName(saved.userName)
         if (saved.focus) setFocus({ ...DEFAULT_FOCUS, ...saved.focus })
+        if (Array.isArray(saved.distractions)) setDistractions(saved.distractions)
       }
     } catch {
       // Datos ilegibles: se arranca vacío.
@@ -181,11 +184,11 @@ export default function Page() {
   useEffect(() => {
     if (!loaded) return
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, payments, goal, plan, routines, active, draft, mode, userName, focus }))
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, payments, goal, plan, routines, active, draft, mode, userName, focus, distractions }))
     } catch {
       // Sin almacenamiento (modo privado): la app sigue andando, sólo no recuerda.
     }
-  }, [loaded, tasks, clients, projects, payments, goal, plan, routines, active, draft, mode, userName, focus])
+  }, [loaded, tasks, clients, projects, payments, goal, plan, routines, active, draft, mode, userName, focus, distractions])
 
   // El tiempo se calcula desde el inicio, así que sobrevive a pestañas en segundo plano.
   useEffect(() => {
@@ -214,14 +217,39 @@ export default function Page() {
     el.dataset.focusSites = focus.sites.join(',')
   }, [blocking, focus.sites])
 
-  // La extensión se anuncia con data-focus-ext al cargar la página (si no, está sin instalar o hay que refrescar).
+  // La extensión se anuncia con data-focus-ext al cargar la página (si no, está sin instalar o hay que refrescar)
+  // y deja en data-focus-log los intentos de abrir sitios bloqueados.
   useEffect(() => {
     const el = document.documentElement
-    const read = () => setExtVersion(el.dataset.focusExt ?? '')
+    const read = () => {
+      setExtVersion(el.dataset.focusExt ?? '')
+      if (!el.dataset.focusLog) return
+      try { const incoming = JSON.parse(el.dataset.focusLog); setDistractions((cur) => mergeDistractions(cur, incoming)) } catch { /* registro ilegible */ }
+    }
     read()
     const obs = new MutationObserver(read)
-    obs.observe(el, { attributes: true, attributeFilter: ['data-focus-ext'] })
+    obs.observe(el, { attributes: true, attributeFilter: ['data-focus-ext', 'data-focus-log'] })
     return () => obs.disconnect()
+  }, [])
+
+  // Estado para el popup de la extensión (iniciar y parar el timer desde cualquier pestaña).
+  useEffect(() => {
+    if (!loaded || !today) return
+    document.documentElement.dataset.taskerState = JSON.stringify(buildExtState({ tasks, projects, clients, active, draft, today, personal: PERSONAL }))
+  }, [loaded, tasks, projects, clients, active, draft.name, draft.projectId, today])
+
+  // Comandos del popup: llegan como mensajes de la misma ventana, que reenvía la extensión.
+  const commandRef = useRef<(c: { type?: string; name?: string; projectId?: string }) => void>(() => {})
+  commandRef.current = (c) => {
+    if (c.type === 'start' && typeof c.projectId === 'string' && !running) {
+      const projectId = known(c.projectId)
+      startWith({ name: String(c.name ?? '').slice(0, 140), projectId, billable: defaultBillable(projectId, projects, clients), tags: '', note: '' })
+    } else if (c.type === 'stop' && running) stopTask()
+  }
+  useEffect(() => {
+    const on = (e: MessageEvent) => { if (e.source === window && e.data?.tasker === 'cmd' && e.data.cmd) commandRef.current(e.data.cmd) }
+    window.addEventListener('message', on)
+    return () => window.removeEventListener('message', on)
   }, [])
 
   const suggestedTags = useMemo(() => {
@@ -642,7 +670,7 @@ export default function Page() {
         </>}
 
         {activeTab === 'Tareas' && <TasksView tasks={tasks} backlog={backlog} routines={routines} setRoutines={setRoutines} onStartRoutine={startRoutine} onCreateProject={(p) => setProjects((cur) => [...cur, p])} projects={projects} clients={clients} onStartPlan={startPlanItem} onRemovePlan={removePlan} onUpdatePlan={(item) => setPlan((cur) => cur.map((x) => (x.id === item.id ? item : x)))} today={today} onDelete={deleteTask} onDeleteMany={deleteMany} onSetBillable={setBillable} onRepeat={repeatTask} onEdit={editTask} onToggleBillable={toggleBillable} onAddManual={openManual} />}
-        {activeTab === 'Estadísticas' && today && <StatsView tasks={tasks} payments={payments} projects={projects} clients={clients} goal={goal} setGoal={setGoal} today={today} />}
+        {activeTab === 'Estadísticas' && today && <StatsView distractions={distractions} extVersion={extVersion} tasks={tasks} payments={payments} projects={projects} clients={clients} goal={goal} setGoal={setGoal} today={today} />}
         {activeTab === 'Pagos' && today && <PaymentsView clients={clients} projects={projects} payments={payments} setPayments={setPayments} today={today} />}
         {activeTab === 'Plataformas' && <ClientsView clients={clients} projects={projects} tasks={tasks} payments={payments} setClients={setClients} setProjects={setProjects} setTasks={setTasks} setPayments={setPayments} />}
       </div>

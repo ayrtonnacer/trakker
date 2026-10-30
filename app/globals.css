@@ -902,3 +902,20 @@ button.goal-compact:hover { background: var(--soft); }
 .ext-ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
 .ext-bad { color: var(--text); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .ext-bad ol { margin: 6px 0 0; padding-left: 20px; list-style: decimal; }
+
+/* Distracciones */
+.distraction-panel { margin-bottom: 16px; }
+.distraction { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(260px, 2fr); gap: 20px; }
+@media (max-width: 760px) { .distraction { grid-template-columns: 1fr; } }
+.dist-sites h4 { margin: 0 0 10px; color: var(--muted); font-size: calc(13px * var(--fs)); font-weight: 500; }
+.dist-site { display: grid; grid-template-columns: minmax(70px, 1fr) 2fr auto; align-items: center; gap: 8px; margin-bottom: 6px; font-size: calc(13px * var(--fs)); }
+.dist-site span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dist-site b { color: var(--strong); font-variant-numeric: tabular-nums; }
+.dist-hours { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.dist-row { height: 38px; }
+.dist-row b { display: flex; align-items: flex-end; height: 100%; }
+.dist-row em { display: block; width: 100%; min-height: 1px; border-radius: 2px 2px 0 0; background: var(--line-strong); }
+.dist-row em.best { background: var(--ok); }
+.dist-row em.bad { background: var(--danger); }
+.dist-insight { margin: 8px 0 0; color: var(--muted); font-size: calc(13px * var(--fs)); line-height: 1.5; }
+.dist-insight b { color: var(--text); }

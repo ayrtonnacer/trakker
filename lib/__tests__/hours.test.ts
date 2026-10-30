@@ -51,3 +51,50 @@ describe('modo foco', () => {
     expect(parseSites('https://www.youtube.com/watch?v=1\nx.com, instagram.com  x.com\nno es un sitio')).toEqual(['youtube.com', 'x.com', 'instagram.com'])
   })
 })
+
+describe('distracciones', () => {
+  const at = (day: string, hh: number, mm = 0) => new Date(`${day}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`).getTime()
+
+  it('junta lo nuevo sin repetir y descarta basura', async () => {
+    const { mergeDistractions } = await import('../focus')
+    const a = [{ t: 1, site: 'x.com' }]
+    const merged = mergeDistractions(a, [{ t: 1, site: 'x.com' }, { t: 2, site: 'youtube.com' }, { t: 'no', site: 1 }, null])
+    expect(merged).toEqual([{ t: 1, site: 'x.com' }, { t: 2, site: 'youtube.com' }])
+    expect(mergeDistractions(a, 'nada')).toBe(a)
+  })
+
+  it('cuenta por sitio, por hora y encuentra la franja', async () => {
+    const { distractionStats } = await import('../focus')
+    const list = [
+      { t: at('2026-10-27', 15, 10), site: 'youtube.com' }, { t: at('2026-10-27', 15, 40), site: 'youtube.com' },
+      { t: at('2026-10-28', 16, 5), site: 'x.com' }, { t: at('2026-10-29', 9, 0), site: 'x.com' },
+      { t: at('2026-09-01', 15, 0), site: 'fuera.com' },
+    ]
+    const s = distractionStats(list, '2026-10-26', '2026-11-01')
+    expect(s.total).toBe(4)
+    expect(s.bySite).toEqual([{ site: 'x.com', n: 2, pct: 50 }, { site: 'youtube.com', n: 2, pct: 50 }])
+    expect(s.byHour[15]).toBe(2)
+    expect(s.peak).toEqual({ from: 14, to: 17, pct: 75 })
+  })
+})
+
+describe('estado para la extensión', () => {
+  it('arma proyectos, recientes sin repetir y lo trabajado hoy', async () => {
+    const { buildExtState } = await import('../focus')
+    const s = buildExtState({
+      tasks: [
+        { id: 1, name: 'Evaluar', date: '2026-10-29', seconds: 600, projectId: 'p1' },
+        { id: 2, name: 'evaluar', date: '2026-10-30', seconds: 1800, projectId: 'p1' },
+        { id: 3, name: 'Viejo', date: '2026-10-30', seconds: 60, projectId: 'p9' },
+        { id: 4, name: 'Leer guía', date: '2026-10-28', seconds: 100, projectId: 'p2' },
+      ],
+      projects: [{ id: 'p1', name: 'AI', color: '#111', clientId: 'c1' }, { id: 'p2', name: 'Mío', color: '#222', clientId: null }, { id: 'p9', name: 'Cerrado', color: '#333', clientId: 'c1', status: 'terminado' }],
+      clients: [{ id: 'c1', name: 'Outlier' }],
+      active: { base: 0, startedAt: null }, draft: { name: '', projectId: null }, today: '2026-10-30', personal: 'Personal',
+    })
+    expect(s.todaySeconds).toBe(1860)
+    expect(s.recent).toEqual([{ name: 'evaluar', projectId: 'p1' }, { name: 'Leer guía', projectId: 'p2' }])
+    expect(s.projects.map((p) => `${p.client}/${p.name}`)).toEqual(['Outlier/AI', 'Personal/Mío'])
+    expect(s.running).toBe(false)
+  })
+})

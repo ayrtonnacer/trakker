@@ -1,8 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Tasker CRM Foco",
-  "version": "1.1.0",
-  "description": "Bloquea los sitios de tu modo foco mientras corre el timer de Tasker CRM.",
+  "version": "1.2.0",
+  "description": "Iniciá y parás el timer de Tasker CRM desde cualquier pestaña y bloqueá los sitios que te distraen mientras trabajás.",
+  "icons": { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon-128.png" },
+  "action": { "default_title": "Tasker CRM", "default_popup": "popup.html", "default_icon": { "16": "icon-16.png", "32": "icon-32.png" } },
   "permissions": ["declarativeNetRequest", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },

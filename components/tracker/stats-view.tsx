@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Clock3, Landmark, Timer } from 'lucide-react
 import { dateKey, fmtHours, fmtMoney, fmtShort, goalTarget, paymentClientId, type Client, type Goal, type Payment, type Project, type Task } from '@/lib/game'
 import { GoalPanel } from './goal-panel'
 import { effectiveRate } from '@/lib/finance'
+import { EXT_LATEST, distractionStats, type Distraction } from '@/lib/focus'
 import { PERIODS, buildEntries, computeStats, groupEntries, hourProfile, type Bin, type GroupBy, type HourProfile, type Period } from '@/lib/stats'
 
 const GROUPS: { id: GroupBy; label: string }[] = [
@@ -14,7 +15,7 @@ const GROUPS: { id: GroupBy; label: string }[] = [
   { id: 'tarea', label: 'Tarea' },
 ]
 
-type Props = { tasks: Task[]; payments: Payment[]; projects: Project[]; clients: Client[]; goal: Goal | null; setGoal: (g: Goal | null) => void; today: string }
+type Props = { distractions: Distraction[]; extVersion: string; tasks: Task[]; payments: Payment[]; projects: Project[]; clients: Client[]; goal: Goal | null; setGoal: (g: Goal | null) => void; today: string }
 
 /** Tope del eje redondeado a 1, 2 o 5 × 10ⁿ para que las marcas queden prolijas. */
 function niceMax(v: number) {
@@ -67,6 +68,38 @@ function BarChart({ title, money, bins, byMonth, lineGoal, binTargets }: ChartPr
 
 const ROWS = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
 
+type Distracted = ReturnType<typeof distractionStats>
+
+/** Qué sitios te distraen y a qué horas, al lado de las horas en que más trabajás. */
+function DistractionPanel({ stats, work, best, extVersion, hasList }: { stats: Distracted; work: number[]; best: HourProfile['best']; extVersion: string; hasList: boolean }) {
+  const wMax = Math.max(...work)
+  const dMax = Math.max(...stats.byHour)
+  const topSites = stats.bySite.slice(0, 6)
+  const outdated = !!extVersion && extVersion.localeCompare(EXT_LATEST, undefined, { numeric: true }) < 0
+  return (
+    <article className="panel distraction-panel">
+      <div className="panel-heading"><h3>¿Qué te distrae y cuándo?</h3>{stats.peak && <span className="legend">Más intentos: <b>{stats.peak.from} a {stats.peak.to} h</b> · {stats.peak.pct}%</span>}</div>
+      {stats.total === 0 ? (
+        <p className="empty-list">{outdated ? <>Tu extensión es de una versión anterior y no registra los intentos: actualizala (README de la carpeta <code>extension</code>).</> : !extVersion ? <>Se registra con la extensión <b>Tasker CRM Foco</b> cuando tu modo foco bloquea un sitio. Todavía no la detecto en este navegador.</> : !hasList ? <>Cargá sitios en <b>Modo foco</b> (debajo del timer): cada vez que intentes abrir uno mientras trabajás, queda anotado.</> : 'Sin intentos en este período. Buena señal.'}</p>
+      ) : (
+        <div className="distraction">
+          <div className="dist-sites">
+            <h4>{stats.total} intento{stats.total === 1 ? '' : 's'} de abrir sitios bloqueados</h4>
+            {topSites.map((x) => <div className="dist-site" key={x.site}><span>{x.site}</span><div className="group-bar"><div style={{ width: `${x.pct}%`, background: 'var(--danger)' }} /></div><b>{x.n}</b></div>)}
+            {stats.bySite.length > topSites.length && <small className="field-help">y {stats.bySite.length - topSites.length} sitio{stats.bySite.length - topSites.length === 1 ? '' : 's'} más</small>}
+          </div>
+          <div className="dist-hours" role="img" aria-label="Horas de trabajo e intentos de distracción por hora">
+            <div className="hours-row dist-row"><span title="Tiempo trabajado">Trab.</span>{work.map((v, h) => <b key={h} title={`${h}:00 · ${fmtHours(v)} trabajado`}><em className={best && h >= best.from && h < best.to ? 'best' : ''} style={{ height: `${wMax ? (v / wMax) * 100 : 0}%` }} /></b>)}</div>
+            <div className="hours-row dist-row"><span title="Intentos de abrir sitios bloqueados">Dist.</span>{stats.byHour.map((v, h) => <b key={h} title={`${h}:00 · ${v} intento${v === 1 ? '' : 's'}`}><em className="bad" style={{ height: `${dMax ? (v / dMax) * 100 : 0}%` }} /></b>)}</div>
+            <div className="hours-row hours-axis"><span />{work.map((_, h) => <small key={h}>{h % 3 === 0 ? h : ''}</small>)}</div>
+            {stats.peak && best && <p className="dist-insight">Rendís más entre las <b>{best.from} y las {best.to} h</b> y te distraés más entre las <b>{stats.peak.from} y las {stats.peak.to} h</b>. {stats.peak.from < best.to && stats.peak.to > best.from ? 'Se pisan: probá mover lo que más te cuesta a otra franja.' : 'Reservá tu mejor franja para las tareas que más te cuestan.'}</p>}
+          </div>
+        </div>
+      )}
+    </article>
+  )
+}
+
 /** Tiempo por día de la semana y hora: dónde se concentra tu trabajo. */
 function HoursPanel({ profile }: { profile: HourProfile }) {
   const max = Math.max(...profile.grid.flat())
@@ -88,7 +121,7 @@ function HoursPanel({ profile }: { profile: HourProfile }) {
   )
 }
 
-export function StatsView({ tasks, payments, projects, clients, goal, setGoal, today }: Props) {
+export function StatsView({ distractions, extVersion, tasks, payments, projects, clients, goal, setGoal, today }: Props) {
   const [period, setPeriod] = useState<Period>('semana')
   const [offset, setOffset] = useState(0)
   const [groupBy, setGroupBy] = useState<GroupBy>('cliente')
@@ -118,6 +151,7 @@ export function StatsView({ tasks, payments, projects, clients, goal, setGoal, t
     }
     return hourProfile(tasks.filter((t) => t.date >= from && t.date <= to && (!billableOnly || t.billable) && (!clientFilter || clientName(t.projectId, t.client) === clientFilter)))
   }, [tasks, projects, clients, s.range, clientFilter, billableOnly])
+  const distracted = useMemo(() => distractionStats(distractions, dateKey(s.range.from), dateKey(s.range.to)), [distractions, s.range])
   const groups = useMemo(() => {
     const gs = groupEntries(s.entries, groupBy, clientColors)
     return gs.filter((g) => g.seconds > 0 || g.amount > 0).sort((x, y) => y.amount - x.amount || y.seconds - x.seconds)
@@ -187,6 +221,7 @@ export function StatsView({ tasks, payments, projects, clients, goal, setGoal, t
       </div>
 
       <HoursPanel profile={profile} />
+      <DistractionPanel stats={distracted} work={profile.byHour} best={profile.best} extVersion={extVersion} hasList={distractions.length > 0} />
 
       <article className="panel group-panel">
         <div className="panel-heading"><h3>Tiempo y plata por {GROUPS.find((g) => g.id === groupBy)!.label.toLowerCase()}</h3>
