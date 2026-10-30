@@ -8,11 +8,24 @@ export type Link = { label: string; url: string }
 export type ClientStatus = 'vista' | 'aplicado' | 'evaluacion' | 'onboarding' | 'activo' | 'pausado' | 'rechazado' | 'finalizado' | 'prospecto' | 'potencial' | 'cerrado'
 export type Stage = Exclude<ClientStatus, 'prospecto' | 'potencial' | 'cerrado'>
 
-export const STAGE_GROUPS: { id: string; label: string; stages: Stage[] }[] = [
-  { id: 'busqueda', label: 'Búsqueda', stages: ['vista', 'aplicado', 'evaluacion', 'onboarding'] },
-  { id: 'adentro', label: 'Adentro', stages: ['activo', 'pausado'] },
-  { id: 'salida', label: 'Cerradas', stages: ['rechazado', 'finalizado'] },
+/**
+ * Para un tasker lo que importa es cuántas cuentas tiene andando, cuántas postulaciones esperan
+ * respuesta y cuántas lo rechazaron: tener varias cuentas activas es lo que lo protege cuando una se queda sin tareas.
+ */
+export type AccountBucket = 'cuenta' | 'proceso' | 'rechazado' | 'finalizado'
+export const ACCOUNT_BUCKETS: { id: AccountBucket; label: string; help: string; stages: Stage[] }[] = [
+  { id: 'cuenta', label: 'Con cuenta', help: 'Activas o en pausa: ya podés taskear', stages: ['activo', 'pausado'] },
+  { id: 'proceso', label: 'Aplicadas', help: 'En vista, aplicado, evaluación u onboarding', stages: ['vista', 'aplicado', 'evaluacion', 'onboarding'] },
+  { id: 'rechazado', label: 'Rechazadas', help: 'No pasaste o no respondieron', stages: ['rechazado'] },
+  { id: 'finalizado', label: 'Cerradas', help: 'Trabajaste ahí y terminó', stages: ['finalizado'] },
 ]
+/** Cuentas activas a partir de las que ya no se sugiere sumar otra plataforma. */
+export const MIN_ACCOUNTS = 3
+
+export function accountBucket(c: { status?: ClientStatus } | null | undefined): AccountBucket {
+  const st = clientStatus(c)
+  return ACCOUNT_BUCKETS.find((b) => b.stages.includes(st))!.id
+}
 
 export const CLIENT_STATUSES: { id: Stage; label: string; help: string }[] = [
   { id: 'vista', label: 'En vista', help: 'La viste o te la recomendaron; todavía no aplicaste' },
@@ -171,6 +184,11 @@ export const DAILY_GOAL_HOURS = 6
 
 export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+}
+
+/** Saludo según la hora: de 6 a 12 buenos días, de 12 a 20 buenas tardes, el resto buenas noches. */
+export function greetingFor(hour: number) {
+  return hour >= 6 && hour < 12 ? 'Buenos días' : hour >= 12 && hour < 20 ? 'Buenas tardes' : 'Buenas noches'
 }
 
 export function dateKey(d = new Date()) {

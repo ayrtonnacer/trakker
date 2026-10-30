@@ -6,7 +6,10 @@ import {
   BILLING_LABEL,
   CLIENT_STATUSES,
   IDLE_DAYS,
-  STAGE_GROUPS,
+  ACCOUNT_BUCKETS,
+  MIN_ACCOUNTS,
+  accountBucket,
+  type AccountBucket,
   clientStatus,
   NO_CLIENT,
   PAY_METHODS,
@@ -103,7 +106,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
   const [payForm, setPayForm] = useState<Payment | { clientId: string; bonus?: boolean } | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [openPayments, setOpenPayments] = useState<Record<string, boolean>>({})
-  const [statusFilter, setStatusFilter] = useState<ClientStatus | 'personal' | ''>('')
+  const [statusFilter, setStatusFilter] = useState<AccountBucket | 'personal' | ''>('')
   const [query, setQuery] = useState('')
   const [error, setError] = useState('')
   // Con muchos proyectos: por defecto sólo los activos, y se puede ver una lista plana filtrada por cliente.
@@ -277,7 +280,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
   const isPersonal = (p: Project) => !p.clientId || !clients.some((c) => c.id === p.clientId)
   const personal = projects.filter(isPersonal)
   const statusOk = (p: Project) => !projectStatus || statusOf(p) === projectStatus
-  const showClients = clientFilter ? (clientFilter === 'personal' ? [] : clients.filter((c) => c.id === clientFilter)) : statusFilter === 'personal' ? [] : clients.filter((c) => !statusFilter || clientStatus(c) === statusFilter)
+  const showClients = clientFilter ? (clientFilter === 'personal' ? [] : clients.filter((c) => c.id === clientFilter)) : statusFilter === 'personal' ? [] : clients.filter((c) => !statusFilter || accountBucket(c) === statusFilter)
   const showPersonal = clientFilter ? clientFilter === 'personal' : !statusFilter || statusFilter === 'personal'
   const groups = [
     ...showClients.map((c) => {
@@ -291,7 +294,10 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
   // Lista plana de proyectos: lo más reciente arriba.
   const flat = groups.flatMap((g) => g.items).sort((a, b) => lastWork(b.id).localeCompare(lastWork(a.id)) || a.name.localeCompare(b.name))
   const sheet = sheetId ? clients.find((c) => c.id === sheetId) ?? null : null
-  const counts = STATUSES.map((s) => ({ ...s, n: clients.filter((c) => clientStatus(c) === s.id).length }))
+  const counts = ACCOUNT_BUCKETS.map((b) => ({ ...b, n: clients.filter((c) => accountBucket(c) === b.id).length }))
+  const countOf = (id: AccountBucket) => counts.find((b) => b.id === id)!.n
+  // Aceptación: de las postulaciones que ya tuvieron respuesta, en cuántas entraste.
+  const decided = countOf('cuenta') + countOf('finalizado') + countOf('rechazado')
 
   function renderProject(p: Project, withClient = false) {
     const pt = projectTotals(p)
@@ -369,6 +375,20 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
         )
       })()}
 
+      {clients.length > 0 && <div className="accounts">
+        <div className="accounts-head">
+          <span><b>{countOf('cuenta')}</b> cuenta{countOf('cuenta') === 1 ? '' : 's'} para taskear · <b>{countOf('proceso')}</b> postulaci{countOf('proceso') === 1 ? 'ón' : 'ones'} esperando · <b>{countOf('rechazado')}</b> rechazo{countOf('rechazado') === 1 ? '' : 's'}</span>
+          {decided > 0 && <small>Te aceptaron en {countOf('cuenta') + countOf('finalizado')} de {decided} ({Math.round(((countOf('cuenta') + countOf('finalizado')) / decided) * 100)}%)</small>}
+        </div>
+        <div className="accounts-bar" role="img" aria-label={counts.map((b) => `${b.label} ${b.n}`).join(', ')}>{counts.filter((b) => b.n > 0).map((b) => <i key={b.id} className={`acc-${b.id}`} style={{ flex: b.n }} title={`${b.label}: ${b.n}`} />)}</div>
+        <div className="accounts-filter" role="tablist" aria-label="Filtrar plataformas">
+          <button role="tab" aria-selected={!statusFilter} className={!statusFilter ? 'seg-on' : ''} onClick={() => setStatusFilter('')}>Todas <small>{clients.length}</small></button>
+          {counts.map((b) => <button key={b.id} role="tab" title={b.help} aria-selected={statusFilter === b.id} className={statusFilter === b.id ? 'seg-on' : ''} onClick={() => { setStatusFilter(b.id); setLayout('clientes') }}><i className={`acc-${b.id}`} /> {b.label} <small>{b.n}</small></button>)}
+          <button role="tab" aria-selected={statusFilter === 'personal'} className={statusFilter === 'personal' ? 'seg-on' : ''} onClick={() => { setStatusFilter('personal'); setLayout('clientes') }}>{PERSONAL} <small>{personal.length}</small></button>
+        </div>
+        {countOf('cuenta') < MIN_ACCOUNTS && <p className="accounts-tip">Conviene tener al menos {MIN_ACCOUNTS} cuentas en paralelo: las plataformas de AI training se quedan sin tareas de un día para el otro, y con varias seguís taskeando en otra.</p>}
+      </div>}
+
       <div className="clients-toolbar">
         <div className="segmented small" role="tablist" aria-label="Vista">
           <button role="tab" aria-selected={layout === 'clientes'} className={layout === 'clientes' ? 'seg-on' : ''} onClick={() => setLayout('clientes')}><Users /> Por plataforma</button>
@@ -377,11 +397,6 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
         <label className="search-input clients-search"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar plataforma o proyecto" aria-label="Buscar plataforma o proyecto" />{query && <button className="icon-button" onClick={() => setQuery('')} aria-label="Limpiar búsqueda"><X /></button>}</label>
       </div>
       <div className="task-filters">
-        {!clientFilter && layout === 'clientes' && <div className="funnel-filter" role="tablist" aria-label="Etapa">
-          <button role="tab" aria-selected={!statusFilter} className={!statusFilter ? 'seg-on' : ''} onClick={() => setStatusFilter('')}>Todas <small>{clients.length}</small></button>
-          {STAGE_GROUPS.map((g) => <div className="funnel-group" key={g.id}><span>{g.label}</span>{g.stages.map((id) => { const st = counts.find((x) => x.id === id)!; return <button key={id} role="tab" title={st.help} aria-selected={statusFilter === id} className={statusFilter === id ? 'seg-on' : ''} onClick={() => setStatusFilter(id)}>{st.label} <small>{st.n}</small></button> })}</div>)}
-          <div className="funnel-group"><span>Sin plataforma</span><button role="tab" aria-selected={statusFilter === 'personal'} className={statusFilter === 'personal' ? 'seg-on' : ''} onClick={() => setStatusFilter('personal')}>{PERSONAL} <small>{personal.length}</small></button></div>
-        </div>}
         <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} aria-label="Filtrar por plataforma"><option value="">Todas las plataformas</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}<option value="personal">{PERSONAL}</option></select>
         <select value={projectStatus} onChange={(e) => setProjectStatus(e.target.value as ProjectStatus | '')} aria-label="Estado de los proyectos"><option value="activo">Proyectos activos</option><option value="pausado">Proyectos pausados</option><option value="terminado">Proyectos terminados</option><option value="">Todos los proyectos</option></select>
         {(clientFilter || projectStatus !== 'activo' || statusFilter) && <button className="text-button" onClick={() => { setClientFilter(''); setProjectStatus('activo'); setStatusFilter('') }}><X /> Limpiar</button>}

@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: 'Registro de tiempo, ingresos, clientes y metas para freelancers y taskers.',
   generator: 'v0.app',
   icons: { icon: '/icon.svg', apple: '/icon.svg' },
+  // La extensión de modo foco sólo actúa en páginas con esta marca.
+  other: { 'tasker-crm': 'focus' },
 }
 
 export const viewport: Viewport = {

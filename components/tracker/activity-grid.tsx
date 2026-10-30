@@ -28,7 +28,6 @@ export function ActivityGrid({ secsByDay, today, liveSecs }: { secsByDay: Map<st
       </div>
       <div className="activity-foot">
         <span>{grid.activeDays} {grid.activeDays === 1 ? 'día' : 'días'} con actividad en 6 meses</span>
-        <span className="activity-legend" aria-hidden="true">Menos <i className="lv0" /><i className="lv1" /><i className="lv2" /><i className="lv3" /><i className="lv4" /> Más</span>
       </div>
     </div>
   )

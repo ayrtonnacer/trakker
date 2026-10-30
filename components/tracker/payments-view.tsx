@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ClipboardPaste, Landmark, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
+import { ClipboardPaste, Landmark, Upload, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
 import { PAY_METHODS, PERSONAL, clientStatus, dateKey, fmtMoney, paymentClientId, paymentKind, parseAmount, uid, type Client, type Payment, type Project } from '@/lib/game'
 import { parsePayments, type ParsedLine } from '@/lib/payments-import'
 
@@ -90,7 +90,9 @@ export function PaymentForm({ clients, projects, payments, start, onSave, onClos
   )
 }
 
-const EXAMPLE = `22/10/2026  80,83  Outlier
+const EXAMPLE = `22/10/2026; 80,83; Outlier
+2026-10-15; 64,20; Outlier; Bonus
+22/10/2026  80,83  Outlier
 29/10/2026  US$ 120  Estudio Norte  Bonus
 Oct 30, 2026  +$95.10 USDC  GreenLight`
 
@@ -103,6 +105,20 @@ function BulkImport({ clients, payments, onImport, onClose }: ImportProps) {
   const [method, setMethod] = useState('')
   const [skip, setSkip] = useState<Record<number, boolean>>({})
   const [pick, setPick] = useState<Record<number, string>>({})
+  const [fileName, setFileName] = useState('')
+  const [fileError, setFileError] = useState('')
+
+  async function loadFile(file: File | undefined) {
+    if (!file) return
+    setFileError('')
+    if (/\.(xlsx?|ods|numbers|pdf)$/i.test(file.name)) return setFileError('Ese formato no se puede leer: exportalo como CSV (en Excel o Google Sheets: Archivo → Descargar → CSV).')
+    if (file.size > 2_000_000) return setFileError('El archivo es muy grande (más de 2 MB).')
+    const body = await file.text()
+    setText((cur) => (cur.trim() ? `${cur.trim()}\n${body}` : body))
+    setFileName(file.name)
+    setSkip({})
+    setPick({})
+  }
   const parsed = useMemo(() => parsePayments(text, clients, clientId || null, payments), [text, clients, clientId, payments])
   // La plataforma se puede corregir fila por fila.
   const rows = parsed.map((r, i): ParsedLine => {
@@ -129,7 +145,7 @@ function BulkImport({ clients, payments, onImport, onClose }: ImportProps) {
       <div className="modal-card wide" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose} aria-label="Cerrar"><X /></button>
         <h2>Carga masiva de pagos</h2>
-        <p>Pegá las transferencias tal cual las copiás de Airtm, PayPal, tu banco o una planilla: una por línea, con fecha y monto. Si la línea nombra la plataforma (o quién paga, ej. “Scale AI”), se reconoce sola.</p>
+        <p>Pegá las transferencias en la caja o subí un archivo CSV/TXT: una por línea, con fecha y monto. Podés separar los campos con <b>;</b> (<code>fecha; monto; plataforma; concepto</code>) o pegarlas tal cual las copiás de Airtm, PayPal o tu banco. Si la línea nombra la plataforma (o quién paga, ej. “Scale AI”), se reconoce sola.</p>
         <div className="form-grid">
           <div className="modal-fields two">
             <label>Plataforma si la línea no la dice<select value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">—</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
@@ -137,6 +153,11 @@ function BulkImport({ clients, payments, onImport, onClose }: ImportProps) {
             <datalist id="pay-accounts-bulk">{accountOptions(payments).map((m) => <option key={m} value={m} />)}</datalist>
           </div>
           <label>Transferencias<textarea autoFocus rows={7} className="mono" value={text} onChange={(e) => { setText(e.target.value); setSkip({}); setPick({}) }} placeholder={EXAMPLE} /></label>
+          <div className="file-line">
+            <label className="ghost-button file-button"><Upload /> Subir archivo<input type="file" accept=".csv,.txt,.tsv,text/csv,text/plain" onChange={(e) => { void loadFile(e.target.files?.[0]); e.target.value = '' }} hidden /></label>
+            <small>{fileName ? `Se agregó ${fileName}. Revisá la vista previa.` : 'CSV o TXT exportado de una planilla, Airtm o tu banco.'}</small>
+          </div>
+          {fileError && <p className="form-error">{fileError}</p>}
         </div>
         {rows.length > 0 && (
           <div className="import-preview">

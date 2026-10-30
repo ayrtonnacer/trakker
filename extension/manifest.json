@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Tasker CRM Foco",
+  "version": "1.0.0",
+  "description": "Bloquea los sitios de tu modo foco mientras corre el timer de Tasker CRM.",
+  "permissions": ["declarativeNetRequest", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    { "matches": ["https://*.vercel.app/*", "http://localhost/*", "http://127.0.0.1/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ],
+  "web_accessible_resources": [{ "resources": ["blocked.html"], "matches": ["<all_urls>"] }]
+}

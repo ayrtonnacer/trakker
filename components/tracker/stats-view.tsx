@@ -1,11 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Clock3, DollarSign, Gauge, Landmark, Timer } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Clock3, Landmark, Timer } from 'lucide-react'
 import { dateKey, fmtHours, fmtMoney, fmtShort, goalTarget, paymentClientId, type Client, type Goal, type Payment, type Project, type Task } from '@/lib/game'
 import { GoalPanel } from './goal-panel'
 import { effectiveRate } from '@/lib/finance'
-import { PERIODS, buildEntries, computeStats, groupEntries, type Bin, type GroupBy, type Period } from '@/lib/stats'
+import { PERIODS, buildEntries, computeStats, groupEntries, hourProfile, type Bin, type GroupBy, type HourProfile, type Period } from '@/lib/stats'
 
 const GROUPS: { id: GroupBy; label: string }[] = [
   { id: 'cliente', label: 'Plataforma' },
@@ -65,6 +65,29 @@ function BarChart({ title, money, bins, byMonth, lineGoal, binTargets }: ChartPr
   )
 }
 
+const ROWS = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
+
+/** Tiempo por día de la semana y hora: dónde se concentra tu trabajo. */
+function HoursPanel({ profile }: { profile: HourProfile }) {
+  const max = Math.max(...profile.grid.flat())
+  const level = (v: number) => (v <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((v / max) * 4))))
+  const hMax = Math.max(...profile.byHour)
+  return (
+    <article className="panel hours-panel">
+      <div className="panel-heading"><h3>¿A qué hora trabajás más?</h3>{profile.best && <span className="legend">Tu mejor franja: <b>{profile.best.from} a {profile.best.to} h</b> · {profile.best.pct}% de tu tiempo</span>}</div>
+      {profile.total === 0 ? <p className="empty-list">No hay tareas con hora de inicio en este período.</p> : (
+        <div className="hours">
+          <div className="hours-grid" role="img" aria-label="Tiempo por día y hora">
+            {profile.grid.map((row, r) => <div className="hours-row" key={r}><span>{ROWS[r]}</span>{row.map((v, h) => <i key={h} className={`lv${level(v)}`} title={`${ROWS[r]} ${h}:00 a ${h + 1}:00 · ${v > 0 ? fmtHours(v) : 'nada'}`} />)}</div>)}
+            <div className="hours-row hours-total"><span>Σ</span>{profile.byHour.map((v, h) => <b key={h} title={`${h}:00 a ${h + 1}:00 · ${fmtHours(v)}`}><em style={{ height: `${hMax ? (v / hMax) * 100 : 0}%` }} className={profile.best && h >= profile.best.from && h < profile.best.to ? 'best' : ''} /></b>)}</div>
+            <div className="hours-row hours-axis"><span />{profile.byHour.map((_, h) => <small key={h}>{h % 3 === 0 ? h : ''}</small>)}</div>
+          </div>
+        </div>
+      )}
+    </article>
+  )
+}
+
 export function StatsView({ tasks, payments, projects, clients, goal, setGoal, today }: Props) {
   const [period, setPeriod] = useState<Period>('semana')
   const [offset, setOffset] = useState(0)
@@ -85,6 +108,16 @@ export function StatsView({ tasks, payments, projects, clients, goal, setGoal, t
     const list = payments.filter((p) => p.paid && p.date >= from && p.date <= to && (!clientFilter || nameOf(p) === clientFilter))
     return { gross: list.reduce((a, p) => a + p.amount, 0), fees: list.reduce((a, p) => a + (p.fee ?? 0), 0), count: list.length }
   }, [payments, projects, clients, s.range, clientFilter])
+  // Las franjas salen de las tareas con hora de inicio, con los mismos filtros que el resto.
+  const profile = useMemo(() => {
+    const from = dateKey(s.range.from), to = dateKey(s.range.to)
+    const projectById = new Map(projects.map((p) => [p.id, p]))
+    const clientName = (projectId: string | null, fallback: string) => {
+      const p = projectId ? projectById.get(projectId) : undefined
+      return p ? clients.find((c) => c.id === p.clientId)?.name ?? fallback : fallback
+    }
+    return hourProfile(tasks.filter((t) => t.date >= from && t.date <= to && (!billableOnly || t.billable) && (!clientFilter || clientName(t.projectId, t.client) === clientFilter)))
+  }, [tasks, projects, clients, s.range, clientFilter, billableOnly])
   const groups = useMemo(() => {
     const gs = groupEntries(s.entries, groupBy, clientColors)
     return gs.filter((g) => g.seconds > 0 || g.amount > 0).sort((x, y) => y.amount - x.amount || y.seconds - x.seconds)
@@ -120,18 +153,40 @@ export function StatsView({ tasks, payments, projects, clients, goal, setGoal, t
         </div>
       </div>
 
-      <div className="summary-grid four">
-        <div className="summary-card"><span><Clock3 /> Horas</span><strong>{fmtHours(s.seconds)}</strong><small>{fmtHours(s.avgDaily)} por día · {s.workedDays} día{s.workedDays === 1 ? '' : 's'} con trabajo · {s.billablePct}% facturable</small></div>
-        <div className="summary-card"><span><DollarSign /> Ganado (estimado)</span><strong>US$ {fmtMoney(s.amount)}</strong><small>US$ {fmtMoney(s.avgDailyAmount)} por día · {s.paymentsAmount > 0 ? `incluye US$ ${fmtMoney(s.paymentsAmount)} en pagos` : 'por horas facturadas'}</small></div>
-        <div className="summary-card" title="Lo que las plataformas te pagaron de verdad en este período. Se carga desde la pestaña Pagos."><span><Landmark /> Cobrado</span><strong>US$ {fmtMoney(collected.gross)}</strong><small>{collected.count === 0 ? 'Todavía no registraste pagos en este período' : <>{collected.count} pago{collected.count === 1 ? '' : 's'}{collected.fees > 0 ? ` · comisiones US$ ${fmtMoney(collected.fees)} · neto US$ ${fmtMoney(collected.gross - collected.fees)}` : ''}{s.amount > 0 ? ` · ${collected.gross >= s.amount ? '+' : '−'}US$ ${fmtMoney(Math.abs(collected.gross - s.amount))} vs. estimado` : ''}</>}</small></div>
-        <div className="summary-card" title="Lo ganado en plataformas ÷ TODAS las horas que pasaste en ellas, incluido el tiempo no facturable (assessments, onboarding sin pago, esperas)."><span><Timer /> Tarifa efectiva</span><strong>{s.effectiveRate > 0 ? `US$ ${fmtMoney(s.effectiveRate)}/h` : '—'}</strong><small>{s.unpaidSeconds > 0 ? `incluye ${fmtHours(s.unpaidSeconds)} sin pago` : 'todo el tiempo en plataformas'}{s.perHour > 0 && s.effectiveRate > 0 && s.perHour - s.effectiveRate > 0.005 ? ` · tu hora facturable rinde US$ ${fmtMoney(s.perHour)}` : ''}</small></div>
-        <div className="summary-card" title="En proyectos por presupuesto o entrega se usa lo cobrado ÷ las horas del proyecto, así el valor no salta según cuándo te pagan."><span><Gauge /> Valor de tu hora</span><strong>{s.perHour > 0 ? `US$ ${fmtMoney(s.perHour)}` : '—'}</strong><small>ganado ÷ horas facturables{s.perHour > 0 ? ' (sin contar el tiempo no pago)' : ' (todavía sin horas cobradas)'}</small></div>
-      </div>
+      {(() => {
+        const unpaid = s.seconds - s.billableSeconds
+        const diff = collected.gross - s.amount
+        const gap = s.perHour > 0 && s.effectiveRate > 0 ? Math.round((1 - s.effectiveRate / s.perHour) * 100) : 0
+        return (
+          <div className="summary-grid">
+            <div className="summary-card" title="Todo el tiempo registrado. “Sin pago” es lo que no se factura: leer la documentación, hacer pruebas, assessments, esperas, onboarding no pago y lo personal.">
+              <span><Clock3 /> Tiempo trabajado</span>
+              <strong>{fmtHours(s.seconds)}</strong>
+              {s.seconds > 0 && <div className="split-bar" aria-hidden="true"><i style={{ width: `${s.billablePct}%` }} /></div>}
+              <small>{s.seconds > 0 ? <><b>{fmtHours(s.billableSeconds)}</b> pagas · <b>{fmtHours(unpaid)}</b> sin pago (documentación, pruebas, assessments) · {s.workedDays} día{s.workedDays === 1 ? '' : 's'}</> : 'Sin tiempo registrado en este período'}</small>
+            </div>
+            <div className="summary-card" title="Estimado = horas × tarifa + bonus. Cobrado = lo que te llegó de verdad (pestaña Pagos). Los pagos llegan con atraso: para comparar, mirá el mes o el trimestre.">
+              <span><Landmark /> Cobrado vs. estimado</span>
+              <strong>US$ {fmtMoney(collected.gross)} <em className="vs">/ {fmtMoney(s.amount)}</em></strong>
+              <small>{collected.count === 0
+                ? (s.amount > 0 ? 'Todavía no cargaste pagos de este período: cargalos en Pagos para ver si te pagaron lo que trabajaste' : 'Sin ingresos en este período')
+                : <>{s.amount > 0 ? <><b className={diff < -0.005 ? 'neg' : 'pos'}>{diff >= 0 ? '+' : '−'}US$ {fmtMoney(Math.abs(diff))} ({Math.round((collected.gross / s.amount) * 100)}%)</b> vs. lo estimado</> : 'sin estimado para comparar'}{collected.fees > 0 ? ` · comisiones US$ ${fmtMoney(collected.fees)}` : ''}</>}</small>
+            </div>
+            <div className="summary-card" title="Lo ganado en plataformas ÷ TODAS las horas en ellas, incluido lo que no te pagan. Es lo que de verdad vale tu hora.">
+              <span><Timer /> Valor real de tu hora</span>
+              <strong>{s.effectiveRate > 0 ? `US$ ${fmtMoney(s.effectiveRate)}/h` : '—'}</strong>
+              <small>{s.perHour > 0 ? <>La plataforma paga <b>US$ {fmtMoney(s.perHour)}/h</b>{gap > 0 ? <> · el tiempo sin pago te la baja un <b className="neg">{gap}%</b></> : ' · no hay tiempo sin pago'}</> : 'Todavía sin horas pagas en este período'}</small>
+            </div>
+          </div>
+        )
+      })()}
 
       <div className="stats-grid even">
         <BarChart title={`Horas por ${s.byMonth ? 'mes' : 'día'}`} money={false} bins={s.bins} byMonth={s.byMonth} lineGoal={0} binTargets={[]} />
         <BarChart title={`Ganado por ${s.byMonth ? 'mes' : 'día'}`} money bins={s.bins} byMonth={s.byMonth} lineGoal={lineGoal} binTargets={binTargets} />
       </div>
+
+      <HoursPanel profile={profile} />
 
       <article className="panel group-panel">
         <div className="panel-heading"><h3>Tiempo y plata por {GROUPS.find((g) => g.id === groupBy)!.label.toLowerCase()}</h3>

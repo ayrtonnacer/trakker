@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, BarChart3, Carrot, Cloud, CloudOff, Check, Copy, DollarSign, Flame, History, Home, Landmark, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Repeat, Square, StickyNote, Tag, Users, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Sprout, TreeDeciduous, Trees, BarChart3, Carrot, Cloud, CloudOff, Check, Copy, DollarSign, Flame, History, Home, Landmark, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Repeat, Square, StickyNote, Tag, Users, X } from 'lucide-react'
 import {
   buildTask,
   canBill,
@@ -14,6 +14,7 @@ import {
   fmtShort,
   goalTarget,
   goldFor,
+  greetingFor,
   migrateProject,
   migrateTask,
   milestonesFor,
@@ -45,6 +46,8 @@ import { TaskRow } from '@/components/tracker/task-row'
 import { TasksView, dayLabel } from '@/components/tracker/tasks-view'
 import { STATUS_LABEL, SyncModal } from '@/components/tracker/sync-modal'
 import { useGitSync } from '@/lib/use-sync'
+import { DEFAULT_FOCUS, treeStage, type Focus } from '@/lib/focus'
+import { FocusModal } from '@/components/tracker/focus-modal'
 import type { AppData } from '@/lib/sync'
 import { BACKUP_REMINDER_DAYS, backupAgeDays, downloadBackup, markBackup, readBackupTime, parseBackup } from '@/lib/backup'
 
@@ -109,6 +112,11 @@ export default function Page() {
   const [mode, setMode] = useState<Mode>(DEFAULT_MODE)
   const [loaded, setLoaded] = useState(false)
   const [today, setToday] = useState('')
+  const [hour, setHour] = useState(12)
+  const [userName, setUserName] = useState('')
+  const [nameEdit, setNameEdit] = useState<string | null>(null)
+  const [focus, setFocus] = useState<Focus>(DEFAULT_FOCUS)
+  const [focusOpen, setFocusOpen] = useState(false)
   const [manual, setManual] = useState<Manual | null>(null)
   const [manualError, setManualError] = useState('')
   const [pieces, setPieces] = useState<Piece[]>([])
@@ -139,6 +147,7 @@ export default function Page() {
   useEffect(() => {
     const key = dateKey()
     setToday(key)
+    setHour(new Date().getHours())
     setNow(Date.now())
     setLastBackup(readBackupTime())
     try {
@@ -155,13 +164,15 @@ export default function Page() {
         if (saved.active) setActive(saved.active)
         if (saved.draft) setDraft({ ...EMPTY_DRAFT, ...saved.draft })
         if (saved.mode) setMode({ ...DEFAULT_MODE, ...saved.mode })
+        if (typeof saved.userName === 'string') setUserName(saved.userName)
+        if (saved.focus) setFocus({ ...DEFAULT_FOCUS, ...saved.focus })
       }
     } catch {
       // Datos ilegibles: se arranca vacío.
     }
     setLoaded(true)
     // Si la app queda abierta pasada la medianoche, "hoy" se actualiza solo.
-    const tick = window.setInterval(() => setToday(dateKey()), 30000)
+    const tick = window.setInterval(() => { setToday(dateKey()); setHour(new Date().getHours()) }, 30000)
     const pending = timers.current
     return () => { window.clearInterval(tick); pending.forEach((t) => window.clearTimeout(t)) }
   }, [])
@@ -169,11 +180,11 @@ export default function Page() {
   useEffect(() => {
     if (!loaded) return
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, payments, goal, plan, routines, active, draft, mode }))
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, payments, goal, plan, routines, active, draft, mode, userName, focus }))
     } catch {
       // Sin almacenamiento (modo privado): la app sigue andando, sólo no recuerda.
     }
-  }, [loaded, tasks, clients, projects, payments, goal, plan, routines, active, draft, mode])
+  }, [loaded, tasks, clients, projects, payments, goal, plan, routines, active, draft, mode, userName, focus])
 
   // El tiempo se calcula desde el inicio, así que sobrevive a pestañas en segundo plano.
   useEffect(() => {
@@ -193,6 +204,14 @@ export default function Page() {
   useEffect(() => {
     document.title = running ? `${fmtClock(shown)} · ${draft.name || 'Tasker CRM'}` : 'Tasker CRM'
   }, [running, shown, draft.name])
+
+  // La extensión de foco lee estos atributos: bloquea los sitios sólo mientras corre el timer.
+  const blocking = running && focus.on && focus.sites.length > 0
+  useEffect(() => {
+    const el = document.documentElement
+    el.dataset.focus = blocking ? 'on' : 'off'
+    el.dataset.focusSites = focus.sites.join(',')
+  }, [blocking, focus.sites])
 
   const suggestedTags = useMemo(() => {
     const count = new Map<string, number>()
@@ -503,7 +522,9 @@ export default function Page() {
           {backupNag && (
             <div className="backup-reminder" role="status"><span><b>Tus datos viven solo en este navegador.</b> {lastBackup ? `Hace ${backupAgeDays(lastBackup)} días que no hacés un backup.` : 'Todavía no hiciste ningún backup.'}</span><button className="ghost-button" onClick={() => { downloadBackup(data); markBackup(); setLastBackup(Date.now()) }}>Descargar backup</button><button className="text-button" onClick={() => setSyncOpen(true)}>Guardar en GitHub</button></div>
           )}
-          <section className="welcome-row"><p className="eyebrow">{headerDate}</p><h1>Hola</h1></section>
+          <section className="welcome-row"><p className="eyebrow">{headerDate}</p>{nameEdit !== null
+            ? <form className="name-form" onSubmit={(e) => { e.preventDefault(); setUserName(nameEdit.trim().slice(0, 40)); setNameEdit(null) }}><h1>{greetingFor(hour)},</h1><input autoFocus value={nameEdit} onChange={(e) => setNameEdit(e.target.value)} onBlur={() => { setUserName(nameEdit.trim().slice(0, 40)); setNameEdit(null) }} placeholder="tu nombre" aria-label="Tu nombre" maxLength={40} /></form>
+            : <h1><button className="greeting" onClick={() => setNameEdit(userName)} title="Cambiar tu nombre">{greetingFor(hour)}{userName ? `, ${userName}` : ''}</button>{!userName && <button className="text-button name-ask" onClick={() => setNameEdit('')}>¿Cómo te llamás?</button>}</h1>}</section>
 
           <section className={`timer-bar ${running ? 'is-running' : ''}`}>
             <div className="timer-name-wrap">
@@ -550,6 +571,9 @@ export default function Page() {
           </div>}
           <div className="timer-sub">
             {!running && mode.down && <span className="countdown-presets">Cuenta regresiva: {PRESET_MINUTES.map((m) => <button key={m} className={mode.minutes === m ? 'preset-on' : ''} onClick={() => setMode({ down: true, minutes: m })}>{m} min</button>)}<input type="number" min={1} max={600} value={mode.minutes} onChange={(e) => setMode({ down: true, minutes: Math.min(600, Math.max(1, Math.round(Number(e.target.value)) || 1)) })} aria-label="Minutos" /> min</span>}
+            {(focus.sites.length > 0 || !running) && <button className={`focus-chip ${blocking ? 'focus-on' : ''}`} onClick={() => setFocusOpen(true)} title={focus.sites.length ? `Modo foco: ${focus.sites.join(', ')}` : 'Bloqueá sitios que te distraen mientras corre el timer'}>
+              {blocking ? (() => { const Tree = [Sprout, TreeDeciduous, Trees][treeStage(elapsed)]; return <><Tree /> Foco · {focus.sites.length} sitio{focus.sites.length === 1 ? '' : 's'} bloqueado{focus.sites.length === 1 ? '' : 's'}</> })() : <><Sprout /> {focus.on && focus.sites.length ? `Modo foco: ${focus.sites.length} sitio${focus.sites.length === 1 ? '' : 's'}` : 'Modo foco'}</>}
+            </button>}
             {running && active.target && <span>Cuenta regresiva de {fmtHours(active.target)}: al llegar a cero se registra sola</span>}
             {running && liveGold > 0 && <span>+US$ {fmtMoney(liveGold)} · {info.rate} USD/h</span>}
             {running && info.billing !== 'hora' && <span>{info.billing === 'interno' ? 'Proyecto personal: suma tiempo, no plata' : 'Se cobra por pagos: el tiempo te muestra cuánto rinde la hora'}</span>}
@@ -633,6 +657,8 @@ export default function Page() {
           <button className="primary-button" onClick={saveManual}><Check /> Guardar</button>
         </div>
       </div></div>}
+
+      {focusOpen && <FocusModal focus={focus} onSave={(f) => { setFocus(f); setFocusOpen(false) }} onClose={() => setFocusOpen(false)} />}
 
       {syncOpen && <SyncModal cfg={sync.cfg} status={sync.status} message={sync.message} lastSync={sync.lastSync} onConnect={sync.connect} onDisconnect={sync.disconnect} onSyncNow={sync.syncNow} onClose={() => setSyncOpen(false)} data={data} lastBackup={lastBackup} onBackup={() => { markBackup(); setLastBackup(Date.now()) }} onRestore={(raw) => { const d = parseBackup(raw); if (typeof d === 'string') return d; applyData(d); markBackup(); setLastBackup(Date.now()); return '' }} />}
 

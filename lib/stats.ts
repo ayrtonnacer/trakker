@@ -248,3 +248,43 @@ export function computeStats(all: Entry[], period: Period, offset: number, today
     byMonth,
   }
 }
+
+/** Tiempo por día de la semana (lunes primero) y hora del día. */
+export type HourProfile = { grid: number[][]; byHour: number[]; total: number; best: { from: number; to: number; pct: number } | null }
+
+const BEST_WINDOW = 3
+
+/**
+ * Reparte cada tarea entre las horas que ocupó, desde su hora de inicio. Si cruza la medianoche,
+ * lo que sigue va al día siguiente. Las tareas sin hora de inicio (cargadas sin “Desde”) no cuentan.
+ */
+export function hourProfile(tasks: { date: string; start?: string; seconds: number }[]): HourProfile {
+  const grid = Array.from({ length: 7 }, () => Array<number>(24).fill(0))
+  for (const t of tasks) {
+    const m = t.start?.match(/^(\d{1,2}):(\d{2})$/)
+    if (!m || t.seconds <= 0) continue
+    let row = (noon(t.date).getDay() + 6) % 7
+    let hour = Number(m[1]) % 24
+    let offset = Number(m[2]) * 60
+    let left = t.seconds
+    while (left > 0) {
+      const chunk = Math.min(left, 3600 - offset)
+      grid[row][hour] += chunk
+      left -= chunk
+      offset = 0
+      hour++
+      if (hour === 24) { hour = 0; row = (row + 1) % 7 }
+    }
+  }
+  const byHour = Array.from({ length: 24 }, (_, h) => grid.reduce((s, r) => s + r[h], 0))
+  const total = byHour.reduce((s, v) => s + v, 0)
+  let best: HourProfile['best'] = null
+  if (total > 0) {
+    let top = -1
+    for (let h = 0; h <= 24 - BEST_WINDOW; h++) {
+      const sum = byHour.slice(h, h + BEST_WINDOW).reduce((s, v) => s + v, 0)
+      if (sum > top) { top = sum; best = { from: h, to: h + BEST_WINDOW, pct: Math.round((sum / total) * 100) } }
+    }
+  }
+  return { grid, byHour, total, best }
+}

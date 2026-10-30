@@ -71,3 +71,13 @@ describe('concepto de la carga masiva', () => {
     expect(row.label).toBe('semana 42')
   })
 })
+
+describe('carga masiva separada por punto y coma', () => {
+  it('lee fecha; monto; plataforma', () => {
+    const rows = parsePayments('Fecha;Monto;Plataforma\n22/10/2026;80,83;Outlier\n2026-10-29; 120.5 ;Outlier;Bonus', [{ id: 'c1', name: 'Outlier', color: '#000' }], null, [], '2026-10-30')
+    expect(rows.map((r) => [r.date, r.amount, r.clientId, r.kind, r.error])).toEqual([
+      ['2026-10-22', 80.83, 'c1', 'payout', ''],
+      ['2026-10-29', 120.5, 'c1', 'bonus', ''],
+    ])
+  })
+})
