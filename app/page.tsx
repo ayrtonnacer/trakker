@@ -117,6 +117,7 @@ export default function Page() {
   const [nameEdit, setNameEdit] = useState<string | null>(null)
   const [focus, setFocus] = useState<Focus>(DEFAULT_FOCUS)
   const [focusOpen, setFocusOpen] = useState(false)
+  const [extVersion, setExtVersion] = useState('')
   const [manual, setManual] = useState<Manual | null>(null)
   const [manualError, setManualError] = useState('')
   const [pieces, setPieces] = useState<Piece[]>([])
@@ -212,6 +213,16 @@ export default function Page() {
     el.dataset.focus = blocking ? 'on' : 'off'
     el.dataset.focusSites = focus.sites.join(',')
   }, [blocking, focus.sites])
+
+  // La extensión se anuncia con data-focus-ext al cargar la página (si no, está sin instalar o hay que refrescar).
+  useEffect(() => {
+    const el = document.documentElement
+    const read = () => setExtVersion(el.dataset.focusExt ?? '')
+    read()
+    const obs = new MutationObserver(read)
+    obs.observe(el, { attributes: true, attributeFilter: ['data-focus-ext'] })
+    return () => obs.disconnect()
+  }, [])
 
   const suggestedTags = useMemo(() => {
     const count = new Map<string, number>()
@@ -571,8 +582,8 @@ export default function Page() {
           </div>}
           <div className="timer-sub">
             {!running && mode.down && <span className="countdown-presets">Cuenta regresiva: {PRESET_MINUTES.map((m) => <button key={m} className={mode.minutes === m ? 'preset-on' : ''} onClick={() => setMode({ down: true, minutes: m })}>{m} min</button>)}<input type="number" min={1} max={600} value={mode.minutes} onChange={(e) => setMode({ down: true, minutes: Math.min(600, Math.max(1, Math.round(Number(e.target.value)) || 1)) })} aria-label="Minutos" /> min</span>}
-            {(focus.sites.length > 0 || !running) && <button className={`focus-chip ${blocking ? 'focus-on' : ''}`} onClick={() => setFocusOpen(true)} title={focus.sites.length ? `Modo foco: ${focus.sites.join(', ')}` : 'Bloqueá sitios que te distraen mientras corre el timer'}>
-              {blocking ? (() => { const Tree = [Sprout, TreeDeciduous, Trees][treeStage(elapsed)]; return <><Tree /> Foco · {focus.sites.length} sitio{focus.sites.length === 1 ? '' : 's'} bloqueado{focus.sites.length === 1 ? '' : 's'}</> })() : <><Sprout /> {focus.on && focus.sites.length ? `Modo foco: ${focus.sites.length} sitio${focus.sites.length === 1 ? '' : 's'}` : 'Modo foco'}</>}
+            {(focus.sites.length > 0 || !running) && <button className={`focus-chip ${blocking ? 'focus-on' : ''}`} onClick={() => setFocusOpen(true)} title={focus.sites.length ? `Modo foco: ${focus.sites.join(', ')}${extVersion ? '' : ' · extensión no detectada: no se bloquea nada'}` : 'Bloqueá sitios que te distraen mientras corre el timer'}>
+              {blocking ? (() => { const Tree = [Sprout, TreeDeciduous, Trees][treeStage(elapsed)]; return <><Tree /> Foco · {focus.sites.length} sitio{focus.sites.length === 1 ? '' : 's'} {extVersion ? `bloqueado${focus.sites.length === 1 ? '' : 's'}` : 'sin bloquear: falta la extensión'}</> })() : <><Sprout /> {focus.on && focus.sites.length ? `Modo foco: ${focus.sites.length} sitio${focus.sites.length === 1 ? '' : 's'}` : 'Modo foco'}{focus.sites.length > 0 && !extVersion && <b className="focus-warn" title="No detecto la extensión: no se bloquea nada">!</b>}</>}
             </button>}
             {running && active.target && <span>Cuenta regresiva de {fmtHours(active.target)}: al llegar a cero se registra sola</span>}
             {running && liveGold > 0 && <span>+US$ {fmtMoney(liveGold)} · {info.rate} USD/h</span>}
@@ -658,7 +669,7 @@ export default function Page() {
         </div>
       </div></div>}
 
-      {focusOpen && <FocusModal focus={focus} onSave={(f) => { setFocus(f); setFocusOpen(false) }} onClose={() => setFocusOpen(false)} />}
+      {focusOpen && <FocusModal focus={focus} extVersion={extVersion} blocking={blocking} onSave={(f) => { setFocus(f); setFocusOpen(false) }} onClose={() => setFocusOpen(false)} />}
 
       {syncOpen && <SyncModal cfg={sync.cfg} status={sync.status} message={sync.message} lastSync={sync.lastSync} onConnect={sync.connect} onDisconnect={sync.disconnect} onSyncNow={sync.syncNow} onClose={() => setSyncOpen(false)} data={data} lastBackup={lastBackup} onBackup={() => { markBackup(); setLastBackup(Date.now()) }} onRestore={(raw) => { const d = parseBackup(raw); if (typeof d === 'string') return d; applyData(d); markBackup(); setLastBackup(Date.now()); return '' }} />}
 

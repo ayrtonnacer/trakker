@@ -3,7 +3,8 @@
 import { useMemo, useState } from 'react'
 import { ClipboardPaste, Landmark, Upload, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
 import { PAY_METHODS, PERSONAL, clientStatus, dateKey, fmtMoney, paymentClientId, paymentKind, parseAmount, uid, type Client, type Payment, type Project } from '@/lib/game'
-import { parsePayments, type ParsedLine } from '@/lib/payments-import'
+import { CSV_EXAMPLE, CSV_HEADER, parsePayments, type ParsedLine } from '@/lib/payments-import'
+import { download } from '@/lib/export'
 
 const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 const fmtDay = (d: string) => d.split('-').reverse().slice(0, 2).join('/')
@@ -90,11 +91,9 @@ export function PaymentForm({ clients, projects, payments, start, onSave, onClos
   )
 }
 
-const EXAMPLE = `22/10/2026; 80,83; Outlier
-2026-10-15; 64,20; Outlier; Bonus
-22/10/2026  80,83  Outlier
-29/10/2026  US$ 120  Estudio Norte  Bonus
-Oct 30, 2026  +$95.10 USDC  GreenLight`
+const EXAMPLE = `${CSV_HEADER}
+22/10/2026;80,83;Outlier;Pago semanal
+15/10/2026;64,20;Outlier;Bonus`
 
 type ImportProps = { clients: Client[]; payments: Payment[]; onImport: (ps: Payment[]) => void; onClose: () => void }
 
@@ -113,7 +112,10 @@ function BulkImport({ clients, payments, onImport, onClose }: ImportProps) {
     setFileError('')
     if (/\.(xlsx?|ods|numbers|pdf)$/i.test(file.name)) return setFileError('Ese formato no se puede leer: exportalo como CSV (en Excel o Google Sheets: Archivo → Descargar → CSV).')
     if (file.size > 2_000_000) return setFileError('El archivo es muy grande (más de 2 MB).')
-    const body = await file.text()
+    // Excel en español guarda en Windows-1252: si no es UTF-8 válido se lee así, para no romper las tildes.
+    const buf = await file.arrayBuffer()
+    let body: string
+    try { body = new TextDecoder('utf-8', { fatal: true }).decode(buf) } catch { body = new TextDecoder('windows-1252').decode(buf) }
     setText((cur) => (cur.trim() ? `${cur.trim()}\n${body}` : body))
     setFileName(file.name)
     setSkip({})
@@ -145,7 +147,7 @@ function BulkImport({ clients, payments, onImport, onClose }: ImportProps) {
       <div className="modal-card wide" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose} aria-label="Cerrar"><X /></button>
         <h2>Carga masiva de pagos</h2>
-        <p>Pegá las transferencias en la caja o subí un archivo CSV/TXT: una por línea, con fecha y monto. Podés separar los campos con <b>;</b> (<code>fecha; monto; plataforma; concepto</code>) o pegarlas tal cual las copiás de Airtm, PayPal o tu banco. Si la línea nombra la plataforma (o quién paga, ej. “Scale AI”), se reconoce sola.</p>
+        <p>Pegá o subí un archivo con un pago por fila y los campos separados por <b>;</b> sin espacios de más, en este orden: <code>fecha;monto;plataforma;concepto</code>. La primera fila puede ser el encabezado. Fecha como <code>22/10/2026</code> o <code>2026-10-22</code>, monto como <code>80,83</code>. Si la plataforma va vacía se usa la de abajo; si el concepto dice “Bonus” se carga como bonus. También podés pegar líneas sueltas de Airtm, PayPal o tu banco y se reconocen solas.</p>
         <div className="form-grid">
           <div className="modal-fields two">
             <label>Plataforma si la línea no la dice<select value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">—</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
@@ -155,7 +157,8 @@ function BulkImport({ clients, payments, onImport, onClose }: ImportProps) {
           <label>Transferencias<textarea autoFocus rows={7} className="mono" value={text} onChange={(e) => { setText(e.target.value); setSkip({}); setPick({}) }} placeholder={EXAMPLE} /></label>
           <div className="file-line">
             <label className="ghost-button file-button"><Upload /> Subir archivo<input type="file" accept=".csv,.txt,.tsv,text/csv,text/plain" onChange={(e) => { void loadFile(e.target.files?.[0]); e.target.value = '' }} hidden /></label>
-            <small>{fileName ? `Se agregó ${fileName}. Revisá la vista previa.` : 'CSV o TXT exportado de una planilla, Airtm o tu banco.'}</small>
+            <button type="button" className="text-button" onClick={() => download('plantilla-pagos.csv', `${CSV_EXAMPLE}\n`, 'text/csv;charset=utf-8')}>Descargar plantilla</button>
+            <small>{fileName ? `Se agregó ${fileName}. Revisá la vista previa.` : 'CSV o TXT. En Excel o Sheets: Guardar como CSV.'}</small>
           </div>
           {fileError && <p className="form-error">{fileError}</p>}
         </div>

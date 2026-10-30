@@ -101,11 +101,54 @@ export function findClient(text: string, clients: Client[]): string | null {
 
 const NOISE = /\b(completada|completado|completed|pendiente|pending|usdc|usd|ars|us\$|u\$s|transacci[oó]n|cantidad|compa[nñ]ero|fecha|estado|monto|date|amount|status)\b|[+$|]/gi
 
+/** Columnas del formato con punto y coma. En la fila de encabezado se pueden poner en cualquier orden. */
+export const CSV_HEADER = 'fecha;monto;plataforma;concepto'
+export const CSV_EXAMPLE = `${CSV_HEADER}\n22/10/2026;80,83;Outlier;Pago semanal\n15/10/2026;64,20;Outlier;Bonus`
+const CSV_ALIASES: Record<'date' | 'amount' | 'client' | 'label', string[]> = {
+  date: ['fecha', 'date'], amount: ['monto', 'importe', 'amount', 'cantidad'], client: ['plataforma', 'cliente', 'platform', 'client'], label: ['concepto', 'detalle', 'descripcion', 'description', 'nota'],
+}
+
+/** ¿Es un texto separado por ;? Sí si casi todas las líneas lo tienen. */
+export function isDelimited(text: string) {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim())
+  return lines.length > 0 && lines.filter((l) => l.includes(';')).length >= Math.ceil(lines.length / 2)
+}
+
+/**
+ * Formato fijo: fecha;monto;plataforma;concepto, una fila por pago, con o sin fila de encabezado.
+ * La plataforma puede ir vacía si se eligió una por defecto; el concepto es opcional ("Bonus" lo marca como bonus).
+ */
+function parseDelimited(text: string, clients: Client[], defaultClientId: string | null, existing: Payment[], today: string): ParsedLine[] {
+  const rows = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const split = (l: string) => l.split(';').map((c) => c.trim().replace(/^"(.*)"$/, '$1'))
+  let col = { date: 0, amount: 1, client: 2, label: 3 }
+  const head = split(rows[0]).map(norm)
+  if (head.includes('fecha') || head.includes('date') || head.some((h) => CSV_ALIASES.amount.includes(h))) {
+    const at = (k: keyof typeof CSV_ALIASES, fallback: number) => { const i = head.findIndex((h) => CSV_ALIASES[k].includes(h)); return i >= 0 ? i : fallback }
+    col = { date: at('date', 0), amount: at('amount', 1), client: at('client', 2), label: at('label', 3) }
+    rows.shift()
+  }
+  return rows.map((line): ParsedLine => {
+    const f = split(line)
+    const date = findDate(f[col.date] ?? '', today).date
+    const { amount, negative } = findAmount(f[col.amount] ?? '')
+    const named = (f[col.client] ?? '').trim()
+    const found = named ? findClient(named, clients) : null
+    const clientId = found ?? (named ? null : defaultClientId)
+    const label = (f[col.label] ?? '').slice(0, 80)
+    const kind: PaymentKind = /bonus|reward|premio|incentiv/i.test(label) ? 'bonus' : 'payout'
+    const error = !date ? 'Sin fecha' : amount <= 0 ? 'Sin monto' : negative ? 'Es plata que salió: no se carga' : !clientId ? 'Elegí la plataforma' : ''
+    const duplicate = !error && existing.some((p) => p.date === date && Math.abs(p.amount - amount) < 0.005 && (p.clientId ?? null) === clientId)
+    return { line, date, amount, clientId, label, kind, error, duplicate }
+  })
+}
+
 /**
  * Convierte lo pegado en pagos. Lo normal es un pago por línea (planilla, CSV), pero si cada dato vino
  * en su propia línea (copiar una tabla de Airtm) se juntan líneas hasta tener monto y fecha.
  */
 export function parsePayments(text: string, clients: Client[], defaultClientId: string | null, existing: Payment[], today = dateKey()): ParsedLine[] {
+  if (isDelimited(text)) return parseDelimited(text, clients, defaultClientId, existing, today)
   const complete = (t: string) => { const d = findDate(t, today); return !!d.date && findAmount(d.rest).amount > 0 }
   const records: string[] = []
   let buffer: string[] = []

@@ -4,10 +4,10 @@ import { useState } from 'react'
 import { Check, X } from 'lucide-react'
 import { parseSites, type Focus } from '@/lib/focus'
 
-type Props = { focus: Focus; onSave: (f: Focus) => void; onClose: () => void }
+type Props = { focus: Focus; extVersion: string; blocking: boolean; onSave: (f: Focus) => void; onClose: () => void }
 
 /** Lista de sitios a bloquear mientras corre el timer. */
-export function FocusModal({ focus, onSave, onClose }: Props) {
+export function FocusModal({ focus, extVersion, blocking, onSave, onClose }: Props) {
   const [text, setText] = useState(focus.sites.join('\n'))
   const [on, setOn] = useState(focus.on || focus.sites.length === 0)
   const sites = parseSites(text)
@@ -21,7 +21,16 @@ export function FocusModal({ focus, onSave, onClose }: Props) {
           <label>Sitios que no querés ver mientras trabajás<textarea rows={6} className="mono" value={text} onChange={(e) => setText(e.target.value)} placeholder={'youtube.com\ninstagram.com\nx.com'} /></label>
           {sites.length > 0 && <small className="field-help">{sites.length} sitio{sites.length === 1 ? '' : 's'}: {sites.join(', ')}</small>}
           <label className="check-line"><input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} /> Bloquear mientras corre el timer</label>
-          <p className="memo-warning">Una página web no puede cerrar otras pestañas: el bloqueo lo hace la extensión <b>Tasker CRM Foco</b> para Chrome (carpeta <code>extension</code> del repo). Sin la extensión, igual ves la lista y el arbolito mientras trabajás.</p>
+          {extVersion
+            ? <p className="ext-status ext-ok"><Check /> Extensión conectada (v{extVersion}). {blocking ? 'Ahora mismo está bloqueando.' : 'Bloquea cuando corra el timer.'}</p>
+            : <div className="ext-status ext-bad">
+                <b>No detecto la extensión</b>, y sin ella no se bloquea nada: una página web no puede cerrar otras pestañas.
+                <ol>
+                  <li>Instalá <b>Tasker CRM Foco</b> (carpeta <code>extension</code> del repo) en <code>chrome://extensions</code> con el modo de desarrollador activado. Sólo Chrome, Edge o Brave.</li>
+                  <li>Si ya la instalaste, <b>refrescá esta página</b> (Ctrl+R): sólo se conecta al cargar.</li>
+                  <li>Si la actualizaste, tocá ↻ en su tarjeta de <code>chrome://extensions</code> y volvé a refrescar.</li>
+                </ol>
+              </div>}
         </div>
         <div className="modal-actions">
           <button className="ghost-button" onClick={onClose}>Cancelar</button>

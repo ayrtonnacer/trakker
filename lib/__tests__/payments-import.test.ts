@@ -81,3 +81,30 @@ describe('carga masiva separada por punto y coma', () => {
     ])
   })
 })
+
+describe('formato fecha;monto;plataforma;concepto', () => {
+  const cs: Client[] = [{ id: 'c1', name: 'Outlier', color: '#000', payer: 'Scale AI, Inc.' }, { id: 'c2', name: 'Mercor', color: '#111' }]
+  const run = (text: string, def: string | null = null) => parsePayments(text, cs, def, [], '2026-10-30').map((r) => [r.date, r.amount, r.clientId, r.label, r.kind, r.error])
+
+  it('lee las columnas en orden fijo, con encabezado', () => {
+    expect(run('fecha;monto;plataforma;concepto\n22/10/2026;1.250,50;Outlier;Pago semanal\n2026-10-15;64,20;Mercor;Bonus de calidad')).toEqual([
+      ['2026-10-22', 1250.5, 'c1', 'Pago semanal', 'payout', ''],
+      ['2026-10-15', 64.2, 'c2', 'Bonus de calidad', 'bonus', ''],
+    ])
+  })
+
+  it('sin encabezado, con plataforma vacía y concepto opcional', () => {
+    expect(run('22/10/2026;80,83;;\n23/10/2026;10;Scale AI', 'c2')).toEqual([
+      ['2026-10-22', 80.83, 'c2', '', 'payout', ''],
+      ['2026-10-23', 10, 'c1', '', 'payout', ''],
+    ])
+  })
+
+  it('el encabezado puede venir en otro orden', () => {
+    expect(run('Monto;Fecha;Cliente\n50;01/10/2026;Mercor')).toEqual([['2026-10-01', 50, 'c2', '', 'payout', '']])
+  })
+
+  it('marca lo que falta o no se reconoce', () => {
+    expect(run('fecha;monto;plataforma\n;50;Outlier\n22/10/2026;;Outlier\n22/10/2026;50;Nadie\n22/10/2026;50;').map((r) => r[5])).toEqual(['Sin fecha', 'Sin monto', 'Elegí la plataforma', 'Elegí la plataforma'])
+  })
+})
