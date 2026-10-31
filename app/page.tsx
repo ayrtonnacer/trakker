@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, Sprout, TreeDeciduous, Trees, BarChart3, Carrot, Cloud, CloudOff, Check, Copy, DollarSign, Flame, History, Home, Landmark, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Repeat, Square, StickyNote, Tag, Users, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Volume2, VolumeX, Sprout, TreeDeciduous, Trees, BarChart3, Carrot, Cloud, CloudOff, Check, Copy, DollarSign, Flame, History, Home, Landmark, ListChecks, ListPlus, ListTodo, Pickaxe, Play, Plus, Repeat, Square, StickyNote, Tag, Users, X } from 'lucide-react'
 import {
   buildTask,
   canBill,
@@ -47,6 +47,7 @@ import { TaskRow } from '@/components/tracker/task-row'
 import { TasksView, dayLabel } from '@/components/tracker/tasks-view'
 import { STATUS_LABEL, SyncModal } from '@/components/tracker/sync-modal'
 import { useGitSync } from '@/lib/use-sync'
+import { playChime, unlockAudio } from '@/lib/sound'
 import { DEFAULT_FOCUS, buildExtState, mergeDistractions, treeStage, type Distraction, type Focus } from '@/lib/focus'
 import { FocusModal } from '@/components/tracker/focus-modal'
 import type { AppData } from '@/lib/sync'
@@ -120,6 +121,7 @@ export default function Page() {
   const [focusOpen, setFocusOpen] = useState(false)
   const [extVersion, setExtVersion] = useState('')
   const [distractions, setDistractions] = useState<Distraction[]>([])
+  const [soundOn, setSoundOn] = useState(true)
   const [manual, setManual] = useState<Manual | null>(null)
   const [manualError, setManualError] = useState('')
   const [pieces, setPieces] = useState<Piece[]>([])
@@ -170,6 +172,7 @@ export default function Page() {
         if (typeof saved.userName === 'string') setUserName(saved.userName)
         if (saved.focus) setFocus({ ...DEFAULT_FOCUS, ...saved.focus })
         if (Array.isArray(saved.distractions)) setDistractions(saved.distractions)
+        if (saved.soundOn === false) setSoundOn(false)
       }
     } catch {
       // Datos ilegibles: se arranca vacío.
@@ -184,11 +187,11 @@ export default function Page() {
   useEffect(() => {
     if (!loaded) return
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, payments, goal, plan, routines, active, draft, mode, userName, focus, distractions }))
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, clients, projects, payments, goal, plan, routines, active, draft, mode, userName, focus, distractions, soundOn }))
     } catch {
       // Sin almacenamiento (modo privado): la app sigue andando, sólo no recuerda.
     }
-  }, [loaded, tasks, clients, projects, payments, goal, plan, routines, active, draft, mode, userName, focus, distractions])
+  }, [loaded, tasks, clients, projects, payments, goal, plan, routines, active, draft, mode, userName, focus, distractions, soundOn])
 
   // El tiempo se calcula desde el inicio, así que sobrevive a pestañas en segundo plano.
   useEffect(() => {
@@ -232,19 +235,56 @@ export default function Page() {
     return () => obs.disconnect()
   }, [])
 
+  // Los navegadores sólo dejan sonar después de un gesto: se habilita el audio en el primer clic o tecla.
+  useEffect(() => {
+    const unlock = () => unlockAudio()
+    window.addEventListener('pointerdown', unlock, { once: true })
+    window.addEventListener('keydown', unlock, { once: true })
+    return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock) }
+  }, [])
+
   // Estado para el popup de la extensión (iniciar y parar el timer desde cualquier pestaña).
   useEffect(() => {
     if (!loaded || !today) return
-    document.documentElement.dataset.taskerState = JSON.stringify(buildExtState({ tasks, projects, clients, active, draft, today, personal: PERSONAL }))
-  }, [loaded, tasks, projects, clients, active, draft.name, draft.projectId, today])
+    document.documentElement.dataset.taskerState = JSON.stringify(buildExtState({ tasks, projects, clients, active, draft, plan, routines, weekday: new Date(`${today}T12:00:00`).getDay(), today, personal: PERSONAL }))
+  }, [loaded, tasks, projects, clients, active, draft, plan, routines, today])
 
   // Comandos del popup: llegan como mensajes de la misma ventana, que reenvía la extensión.
-  const commandRef = useRef<(c: { type?: string; name?: string; projectId?: string }) => void>(() => {})
+  type Cmd = { type?: string; id?: string; name?: string; projectId?: string; ref?: string; note?: string; tags?: string; billable?: boolean }
+  const commandRef = useRef<(c: Cmd) => void>(() => {})
   commandRef.current = (c) => {
-    if (c.type === 'start' && typeof c.projectId === 'string' && !running) {
-      const projectId = known(c.projectId)
-      startWith({ name: String(c.name ?? '').slice(0, 140), projectId, billable: defaultBillable(projectId, projects, clients), tags: '', note: '' })
+    const text = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '')
+    const projectId = known(typeof c.projectId === 'string' ? c.projectId : null)
+    const withProject = (d: Draft): Draft => (d.projectId || !projectId ? d : { ...d, projectId, billable: defaultBillable(projectId, projects, clients) })
+    if (c.type === 'start' && !running) {
+      const billable = typeof c.billable === 'boolean' && canBill(projectId, projects) ? c.billable : defaultBillable(projectId, projects, clients)
+      startWith({ name: text(c.name, 140), projectId, billable, tags: text(c.tags, 200), note: text(c.note, 20000), ref: text(c.ref, 80).trim() || undefined })
+    } else if (c.type === 'startPlan' && !running) {
+      const item = plan.find((x) => x.id === c.id && !x.done)
+      if (item) startWith(withProject(planDraft(item)))
+    } else if (c.type === 'startRoutine' && !running) {
+      const r = routines.find((x) => x.id === c.id)
+      if (r) startWith(withProject(routineDraft(r)))
+    } else if (c.type === 'update') {
+      setDraft((d) => {
+        const next = { ...d }
+        if (typeof c.name === 'string') next.name = text(c.name, 140)
+        if (typeof c.note === 'string') next.note = text(c.note, 20000)
+        if (typeof c.tags === 'string') next.tags = text(c.tags, 200)
+        if (typeof c.ref === 'string') next.ref = text(c.ref, 80).trim() || undefined
+        if (projectId && projectId !== d.projectId) { next.projectId = projectId; next.billable = defaultBillable(projectId, projects, clients) }
+        if (typeof c.billable === 'boolean' && canBill(next.projectId, projects)) next.billable = c.billable
+        return next
+      })
+    } else if (c.type === 'later') {
+      const label = text(c.name, 140).trim() || (text(c.ref, 80).trim() ? `Task ${text(c.ref, 80).trim()}` : '')
+      if (label) setPlan((cur) => [...cur, { id: uid(), date: '', text: label, projectId, hours: 0, done: false, ...(text(c.note, 20000).trim() ? { note: text(c.note, 20000).trim() } : {}) }])
     } else if (c.type === 'stop' && running) stopTask()
+    else if (c.type === 'discard' && running) {
+      // El popup ya pidió confirmación.
+      setActive({ base: 0, startedAt: null })
+      setDraft((d) => ({ ...d, name: '', tags: '', note: '', ref: undefined, planId: undefined, routineId: undefined }))
+    }
   }
   useEffect(() => {
     const on = (e: MessageEvent) => { if (e.source === window && e.data?.tasker === 'cmd' && e.data.cmd) commandRef.current(e.data.cmd) }
@@ -313,6 +353,7 @@ export default function Page() {
   function record(task: Task) {
     setTasks((cur) => [task, ...cur])
     celebrate()
+    if (soundOn) playChime()
     toast(`Tarea terminada · ${fmtHours(task.seconds)}`, `${task.amount > 0 ? `+US$ ${fmtMoney(task.amount)} · ` : ''}${task.project}`)
   }
 
@@ -550,6 +591,7 @@ export default function Page() {
           {TABS.map(({ id }) => <button key={id} className={activeTab === id ? 'nav-active' : ''} onClick={() => setActiveTab(id)}>{id}</button>)}
         </nav>
         <div className="header-actions">
+          <button className="sync-button" onClick={() => { const next = !soundOn; setSoundOn(next); if (next) { unlockAudio(); playChime() } }} title={soundOn ? 'Sonido al terminar una tarea: activado' : 'Sonido al terminar una tarea: silenciado'} aria-label={soundOn ? 'Silenciar el sonido' : 'Activar el sonido'} aria-pressed={soundOn}>{soundOn ? <Volume2 /> : <VolumeX />}</button>
           {running && activeTab !== 'Inicio' && <button className="running-pill" onClick={() => setActiveTab('Inicio')}><i /> {fmtClock(shown)}</button>}
           {/* Sin GitHub y con el aviso de backup a la vista, el aviso ya ofrece conectarlo: no se repite acá. */}
           {!backupNag && <button className={`sync-button sync-${sync.status}`} onClick={() => setSyncOpen(true)} title={sync.status === 'off' ? 'Backup y guardado en GitHub' : STATUS_LABEL[sync.status]} aria-label={sync.status === 'off' ? 'Backup y guardado en GitHub' : STATUS_LABEL[sync.status]}>{sync.status === 'off' ? <CloudOff /> : <Cloud />}{sync.status !== 'off' && <span>{STATUS_LABEL[sync.status]}</span>}</button>}

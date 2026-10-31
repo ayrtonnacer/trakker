@@ -21,7 +21,7 @@ export function treeStage(seconds: number): 0 | 1 | 2 {
 }
 
 /** Versión de la extensión que trae esta app: si la instalada es anterior, se avisa. */
-export const EXT_LATEST = '1.2.0'
+export const EXT_LATEST = '1.3.0'
 
 /** Cuando la extensión cortó un intento de abrir un sitio bloqueado. t = milisegundos. */
 export type Distraction = { t: number; site: string }
@@ -58,24 +58,33 @@ export function distractionStats(list: Distraction[], from: string, to: string) 
   return { total, bySite, byHour, peak }
 }
 
-/** Lo que la app le muestra a la extensión para iniciar y parar el timer desde el popup. */
+/** Lo que la app le muestra a la extensión para trabajar con el timer desde el popup. */
 export type ExtState = {
   running: boolean
   startedAt: number | null
   base: number // segundos acumulados antes de este tramo
   name: string
   projectId: string | null
+  ref: string
+  note: string
+  tags: string
+  billable: boolean
   todaySeconds: number
-  projects: { id: string; name: string; color: string; client: string }[]
+  projects: { id: string; name: string; color: string; client: string; canBill: boolean; billableDefault: boolean }[]
   recent: { name: string; projectId: string }[]
+  backlog: { id: string; text: string; projectId: string | null; note: string }[]
+  routines: { id: string; text: string; projectId: string | null }[]
 }
 
 export function buildExtState(input: {
-  tasks: { id: number; name: string; date: string; seconds: number; projectId: string | null }[]
-  projects: { id: string; name: string; color: string; clientId: string | null; status?: string }[]
+  tasks: { id: number; name: string; date: string; seconds: number; projectId: string | null; routineId?: string }[]
+  projects: { id: string; name: string; color: string; clientId: string | null; status?: string; billing?: string }[]
   clients: { id: string; name: string }[]
   active: { base: number; startedAt: number | null }
-  draft: { name: string; projectId: string | null }
+  draft: { name: string; projectId: string | null; ref?: string; note: string; tags: string; billable: boolean }
+  plan: { id: string; text: string; projectId: string | null; note?: string; done: boolean }[]
+  routines: { id: string; text: string; projectId: string | null; days: number[] }[]
+  weekday: number
   today: string
   personal: string
 }): ExtState {
@@ -90,14 +99,25 @@ export function buildExtState(input: {
     recent.push({ name: t.name, projectId: t.projectId })
     if (recent.length >= 5) break
   }
+  const doneToday = new Set(input.tasks.filter((t) => t.date === input.today && t.routineId).map((t) => t.routineId))
   return {
     running: input.active.startedAt !== null,
     startedAt: input.active.startedAt,
     base: input.active.base,
     name: input.draft.name,
     projectId: input.draft.projectId,
+    ref: input.draft.ref ?? '',
+    note: input.draft.note,
+    tags: input.draft.tags,
+    billable: input.draft.billable,
     todaySeconds: input.tasks.filter((t) => t.date === input.today).reduce((s, t) => s + t.seconds, 0),
-    projects: live.map((p) => ({ id: p.id, name: p.name, color: p.color, client: input.clients.find((c) => c.id === p.clientId)?.name ?? input.personal })),
+    projects: live.map((p) => {
+      const client = input.clients.find((c) => c.id === p.clientId)
+      const canBill = p.billing !== 'interno'
+      return { id: p.id, name: p.name, color: p.color, client: client?.name ?? input.personal, canBill, billableDefault: !!client && canBill }
+    }),
     recent,
+    backlog: input.plan.filter((i) => !i.done).slice(0, 8).map((i) => ({ id: i.id, text: i.text, projectId: i.projectId, note: i.note ?? '' })),
+    routines: input.routines.filter((r) => r.days.includes(input.weekday) && !doneToday.has(r.id)).slice(0, 5).map((r) => ({ id: r.id, text: r.text, projectId: r.projectId })),
   }
 }

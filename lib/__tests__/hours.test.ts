@@ -90,11 +90,16 @@ describe('estado para la extensión', () => {
       ],
       projects: [{ id: 'p1', name: 'AI', color: '#111', clientId: 'c1' }, { id: 'p2', name: 'Mío', color: '#222', clientId: null }, { id: 'p9', name: 'Cerrado', color: '#333', clientId: 'c1', status: 'terminado' }],
       clients: [{ id: 'c1', name: 'Outlier' }],
-      active: { base: 0, startedAt: null }, draft: { name: '', projectId: null }, today: '2026-10-30', personal: 'Personal',
+      active: { base: 0, startedAt: null }, draft: { name: '', projectId: null, note: '', tags: '', billable: false }, today: '2026-10-30', personal: 'Personal',
+      plan: [{ id: 'a', text: 'Pendiente', projectId: 'p1', note: 'ver guía', done: false }, { id: 'b', text: 'Hecha', projectId: 'p1', done: true }],
+      routines: [{ id: 'r1', text: 'LinkedIn', projectId: 'p2', days: [5] }, { id: 'r2', text: 'Otra', projectId: 'p2', days: [1] }], weekday: 5,
     })
     expect(s.todaySeconds).toBe(1860)
     expect(s.recent).toEqual([{ name: 'evaluar', projectId: 'p1' }, { name: 'Leer guía', projectId: 'p2' }])
     expect(s.projects.map((p) => `${p.client}/${p.name}`)).toEqual(['Outlier/AI', 'Personal/Mío'])
     expect(s.running).toBe(false)
+    expect(s.backlog).toEqual([{ id: 'a', text: 'Pendiente', projectId: 'p1', note: 'ver guía' }])
+    expect(s.routines).toEqual([{ id: 'r1', text: 'LinkedIn', projectId: 'p2' }])
+    expect(s.projects.map((p) => [p.canBill, p.billableDefault])).toEqual([[true, true], [true, false]])
   })
 })

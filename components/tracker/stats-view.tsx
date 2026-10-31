@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Clock3, Landmark, Timer } from 'lucide-react'
 import { dateKey, fmtHours, fmtMoney, fmtShort, goalTarget, paymentClientId, type Client, type Goal, type Payment, type Project, type Task } from '@/lib/game'
 import { GoalPanel } from './goal-panel'
+import { MultiFilter } from './multi-filter'
 import { effectiveRate } from '@/lib/finance'
 import { EXT_LATEST, distractionStats, type Distraction } from '@/lib/focus'
 import { PERIODS, buildEntries, computeStats, groupEntries, hourProfile, type Bin, type GroupBy, type HourProfile, type Period } from '@/lib/stats'
@@ -125,20 +126,20 @@ export function StatsView({ distractions, extVersion, tasks, payments, projects,
   const [period, setPeriod] = useState<Period>('semana')
   const [offset, setOffset] = useState(0)
   const [groupBy, setGroupBy] = useState<GroupBy>('cliente')
-  const [clientFilter, setClientFilter] = useState('')
+  const [clientFilter, setClientFilter] = useState<string[]>([])
   const [billableOnly, setBillableOnly] = useState(false)
 
   const all = useMemo(() => buildEntries(tasks, payments, projects, clients), [tasks, payments, projects, clients])
   const clientNames = useMemo(() => [...new Set([...clients.map((c) => c.name), ...all.map((t) => t.client)])].sort(), [clients, all])
   const clientColors = useMemo(() => new Map(clients.map((c) => [c.name, c.color])), [clients])
-  const filtered = useMemo(() => all.filter((t) => (!clientFilter || t.client === clientFilter) && (!billableOnly || t.billable)), [all, clientFilter, billableOnly])
+  const filtered = useMemo(() => all.filter((t) => (!clientFilter.length || clientFilter.includes(t.client)) && (!billableOnly || t.billable)), [all, clientFilter, billableOnly])
   const s = useMemo(() => computeStats(filtered, period, offset, today), [filtered, period, offset, today])
   // Lo que de verdad te pagaron en el período (por horas, cobros y bonus), a diferencia de lo ganado, que es estimado.
   const collected = useMemo(() => {
     const from = dateKey(s.range.from)
     const to = dateKey(s.range.to)
     const nameOf = (p: Payment) => clients.find((c) => c.id === paymentClientId(p, projects))?.name ?? ''
-    const list = payments.filter((p) => p.paid && p.date >= from && p.date <= to && (!clientFilter || nameOf(p) === clientFilter))
+    const list = payments.filter((p) => p.paid && p.date >= from && p.date <= to && (!clientFilter.length || clientFilter.includes(nameOf(p))))
     return { gross: list.reduce((a, p) => a + p.amount, 0), fees: list.reduce((a, p) => a + (p.fee ?? 0), 0), count: list.length }
   }, [payments, projects, clients, s.range, clientFilter])
   // Las franjas salen de las tareas con hora de inicio, con los mismos filtros que el resto.
@@ -149,7 +150,7 @@ export function StatsView({ distractions, extVersion, tasks, payments, projects,
       const p = projectId ? projectById.get(projectId) : undefined
       return p ? clients.find((c) => c.id === p.clientId)?.name ?? fallback : fallback
     }
-    return hourProfile(tasks.filter((t) => t.date >= from && t.date <= to && (!billableOnly || t.billable) && (!clientFilter || clientName(t.projectId, t.client) === clientFilter)))
+    return hourProfile(tasks.filter((t) => t.date >= from && t.date <= to && (!billableOnly || t.billable) && (!clientFilter.length || clientFilter.includes(clientName(t.projectId, t.client)))))
   }, [tasks, projects, clients, s.range, clientFilter, billableOnly])
   const distracted = useMemo(() => distractionStats(distractions, dateKey(s.range.from), dateKey(s.range.to)), [distractions, s.range])
   const groups = useMemo(() => {
@@ -182,7 +183,7 @@ export function StatsView({ distractions, extVersion, tasks, payments, projects,
           <button onClick={() => setOffset((o) => o + 1)} disabled={period === 'todo' || offset >= 0} aria-label="Período siguiente"><ChevronRight /></button>
         </div>
         <div className="filters">
-          <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} aria-label="Filtrar por plataforma"><option value="">Todas las plataformas</option>{clientNames.map((n) => <option key={n} value={n}>{n}</option>)}</select>
+          <MultiFilter options={clientNames.map((n) => ({ id: n, label: n, color: clientColors.get(n) }))} value={clientFilter} onChange={setClientFilter} allLabel="Todas las plataformas" noun="plataformas" />
           <button className={`chip ${billableOnly ? 'chip-on' : ''}`} onClick={() => setBillableOnly((b) => !b)} aria-pressed={billableOnly}>Sólo facturable</button>
         </div>
       </div>

@@ -919,3 +919,16 @@ button.goal-compact:hover { background: var(--soft); }
 .dist-row em.bad { background: var(--danger); }
 .dist-insight { margin: 8px 0 0; color: var(--muted); font-size: calc(13px * var(--fs)); line-height: 1.5; }
 .dist-insight b { color: var(--text); }
+
+/* Filtro con selección múltiple */
+.multi { position: relative; }
+.multi-button { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; color: var(--text); background: var(--surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.multi-button svg { width: 14px; height: 14px; flex: 0 0 auto; color: var(--muted); }
+.multi-button.multi-on { border-color: var(--accent); }
+.multi-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content; max-width: 280px; max-height: 320px; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 10px; padding: 4px; background: var(--surface); box-shadow: var(--shadow); }
+.multi-item { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 6px; padding: 7px 8px; color: var(--text); background: none; text-align: left; }
+.multi-item:hover { background: var(--hover); }
+.multi-box { display: grid; place-items: center; flex: 0 0 auto; width: 16px; height: 16px; border: 1.5px solid var(--line-strong); border-radius: 4px; }
+.multi-box.on { border-color: var(--accent); color: var(--on-accent); background: var(--accent); }
+.multi-box svg { width: 11px; height: 11px; stroke-width: 3; }
+@media (max-width: 760px) { .multi-menu { left: auto; right: 0; } }

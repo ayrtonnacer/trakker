@@ -1,6 +1,6 @@
 # Tasker CRM Foco (extensión de Chrome)
 
-- **Registrar desde cualquier pestaña:** el ícono de la extensión abre un popup para empezar y parar el timer, con tus proyectos y tareas recientes. No hace falta entrar a la página.
+- **Registrar desde cualquier pestaña:** el ícono de la extensión abre un popup con lo mismo que la caja del timer de la app: nombre, proyecto, **Task ID**, **memo**, etiquetas, **facturable ($)**, tu lista de **Por hacer**, las **rutinas de hoy** y las tareas recientes. Mientras corre el timer podés seguir editando el memo, el ID y el resto. No hace falta entrar a la página.
 - **Modo foco:** bloquea los sitios que cargaste mientras corre el timer, y anota cada intento de abrirlos. Al parar el timer o cerrar la pestaña de la app se desbloquean y las pestañas bloqueadas vuelven a donde estaban.
 - **Estadísticas:** la app muestra qué sitios te distraen y a qué horas, al lado de tus horas de mayor rendimiento.
 
