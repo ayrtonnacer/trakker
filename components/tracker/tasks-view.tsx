@@ -5,6 +5,7 @@ import { CalendarDays, Check, List, Pencil, Play, Plus, Repeat, Search, StickyNo
 import { PERSONAL, canBill, dateKey, fmtHours, fmtMoney, parseTags, uid, type Client, type PlanItem, type Project, type Routine, type Task } from '@/lib/game'
 import { CalendarView } from './calendar-view'
 import { ExportMenu } from './export-menu'
+import { MultiFilter } from './multi-filter'
 import { ProjectPicker } from './project-picker'
 import { TaskRow } from './task-row'
 
@@ -87,7 +88,7 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [projectId, setProjectId] = useState('')
-  const [clientId, setClientId] = useState('')
+  const [clientIds, setClientIds] = useState<string[]>([]) // vacío = todas; 'personal' = sin plataforma
   const lastClicked = useRef<number | null>(null)
   const [routineDraft, setRoutineDraft] = useState<RoutineDraft | null>(null)
   const [routineError, setRoutineError] = useState('')
@@ -97,20 +98,21 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
   const q = query.trim().toLowerCase()
   const [fromKey, toKey] = rangeKeys(range, today, from, to)
   const visible = useMemo(() => {
-    const clientProjects = clientId === 'personal'
-      ? new Set(projects.filter((p) => !p.clientId || !clients.some((c) => c.id === p.clientId)).map((p) => p.id))
-      : clientId ? new Set(projects.filter((p) => p.clientId === clientId).map((p) => p.id)) : null
+    const isPersonal = (p: Project) => !p.clientId || !clients.some((c) => c.id === p.clientId)
+    const clientProjects = clientIds.length
+      ? new Set(projects.filter((p) => (isPersonal(p) ? clientIds.includes('personal') : clientIds.includes(p.clientId!))).map((p) => p.id))
+      : null
     return tasks.filter((t) =>
       t.date >= fromKey && t.date <= toKey &&
       (!projectId || t.projectId === projectId) &&
       // Las tareas sin proyecto cuentan como personales.
-      (!clientProjects || (t.projectId ? clientProjects.has(t.projectId) : clientId === 'personal')) &&
+      (!clientProjects || (t.projectId ? clientProjects.has(t.projectId) : clientIds.includes('personal'))) &&
       (!q || t.name.toLowerCase().includes(q) || (t.ref ?? '').toLowerCase().includes(q) || t.project.toLowerCase().includes(q) || t.client.toLowerCase().includes(q) || t.tags.some((tag) => tag.includes(q))))
-  }, [tasks, q, fromKey, toKey, projectId, clientId, projects, clients])
-  const filtering = !!(q || range !== 'todo' || projectId || clientId)
+  }, [tasks, q, fromKey, toKey, projectId, clientIds, projects, clients])
+  const filtering = !!(q || range !== 'todo' || projectId || clientIds.length)
   const totalSeconds = visible.reduce((s, t) => s + t.seconds, 0)
   const totalAmount = visible.reduce((s, t) => s + t.amount, 0)
-  const projectOptions = projects.filter((p) => !clientId || (clientId === 'personal' ? !p.clientId : p.clientId === clientId))
+  const projectOptions = projects.filter((p) => !clientIds.length || (p.clientId && clients.some((c) => c.id === p.clientId) ? clientIds.includes(p.clientId) : clientIds.includes('personal')))
   const days = useMemo(() => [...new Set(visible.map((t) => t.date))].sort().reverse(), [visible])
   const byDay = useMemo(() => new Map(days.map((day) => [day, visible.filter((t) => t.date === day).sort((a, b) => (b.start ?? '').localeCompare(a.start ?? '') || b.id - a.id)])), [days, visible])
   // Orden en pantalla, para seleccionar un rango con Shift.
@@ -189,7 +191,7 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
 
   const weekday = today ? new Date(`${today}T12:00:00`).getDay() : -1
   const doneToday = new Set(tasks.filter((t) => t.date === today && t.routineId).map((t) => t.routineId))
-  const filterTitle = ['Tareas', clientId === 'personal' ? PERSONAL : clients.find((c) => c.id === clientId)?.name, projects.find((p) => p.id === projectId)?.name].filter(Boolean).join(' · ')
+  const filterTitle = ['Tareas', clientIds.map((id) => (id === 'personal' ? PERSONAL : clients.find((c) => c.id === id)?.name)).filter(Boolean).join(' + '), projects.find((p) => p.id === projectId)?.name].filter(Boolean).join(' · ')
 
   const allVisibleSelected = ordered.length > 0 && ordered.every((id) => selected.has(id))
   const selTasks = tasks.filter((t) => selected.has(t.id))
@@ -269,9 +271,9 @@ export function TasksView({ tasks, backlog, routines, setRoutines, onStartRoutin
       <div className="task-filters">
         <div className="segmented small" role="tablist" aria-label="Fechas">{RANGES.map((r) => <button key={r.id} role="tab" aria-selected={range === r.id} className={range === r.id ? 'seg-on' : ''} onClick={() => setRange(r.id)}>{r.label}</button>)}</div>
         {range === 'rango' && <span className="date-range"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Desde" /> – <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Hasta" /></span>}
-        <select value={clientId} onChange={(e) => { setClientId(e.target.value); setProjectId('') }} aria-label="Filtrar por plataforma"><option value="">Todas las plataformas</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}<option value="personal">{PERSONAL}</option></select>
+        <MultiFilter options={[...clients.map((c) => ({ id: c.id, label: c.name })), { id: 'personal', label: PERSONAL }]} value={clientIds} onChange={(v) => { setClientIds(v); setProjectId('') }} allLabel="Todas las plataformas" noun="plataformas" />
         <select value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Filtrar por proyecto"><option value="">Todos los proyectos</option>{projectOptions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        {filtering && <button className="text-button" onClick={() => { setQuery(''); setRange('todo'); setProjectId(''); setClientId('') }}><X /> Limpiar</button>}
+        {filtering && <button className="text-button" onClick={() => { setQuery(''); setRange('todo'); setProjectId(''); setClientIds([]) }}><X /> Limpiar</button>}
       </div>
       {filtering && visible.length > 0 && <p className="filter-total">{visible.length} tarea{visible.length === 1 ? '' : 's'} · <b>{fmtHours(totalSeconds)}</b>{totalAmount > 0 && <> · <b>US$ {fmtMoney(totalAmount)}</b></>}</p>}
 

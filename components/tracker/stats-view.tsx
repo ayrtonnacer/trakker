@@ -1,13 +1,16 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Clock3, Landmark, Timer } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronLeft, ChevronRight, ClipboardCopy, Clock3, Download, FileSpreadsheet, FileText, Landmark, Printer, Timer } from 'lucide-react'
 import { dateKey, fmtHours, fmtMoney, fmtShort, goalTarget, paymentClientId, type Client, type Goal, type Payment, type Project, type Task } from '@/lib/game'
 import { GoalPanel } from './goal-panel'
 import { MultiFilter } from './multi-filter'
 import { effectiveRate } from '@/lib/finance'
-import { EXT_LATEST, distractionStats, type Distraction } from '@/lib/focus'
-import { PERIODS, buildEntries, computeStats, groupEntries, hourProfile, type Bin, type GroupBy, type HourProfile, type Period } from '@/lib/stats'
+import { EXT_LATEST, type Distraction } from '@/lib/focus'
+import { WEEKDAY_NAMES, rhythm, type Rhythm } from '@/lib/rhythm'
+import { reportHtml, reportMarkdown, type ReportInput } from '@/lib/report'
+import { distractionsToCsv, download, paymentsToCsv, slug, tasksToCsv } from '@/lib/export'
+import { PERIODS, buildEntries, change, computeStats, groupEntries, previousStats, type Bin, type GroupBy, type Period } from '@/lib/stats'
 
 const GROUPS: { id: GroupBy; label: string }[] = [
   { id: 'cliente', label: 'Plataforma' },
@@ -26,10 +29,10 @@ function niceMax(v: number) {
   return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p
 }
 
-type ChartProps = { title: string; money: boolean; bins: Bin[]; byMonth: boolean; lineGoal: number; binTargets: number[] }
+type ChartProps = { money: boolean; setMoney: (m: boolean) => void; bins: Bin[]; byMonth: boolean; lineGoal: number; binTargets: number[] }
 
-/** Barras por día o mes; en dinero marca el ritmo de la meta mensual. */
-function BarChart({ title, money, bins, byMonth, lineGoal, binTargets }: ChartProps) {
+/** Barras por día o mes, en horas o en plata (un solo gráfico con selector); en plata marca el ritmo de la meta mensual. */
+function BarChart({ money, setMoney, bins, byMonth, lineGoal, binTargets }: ChartProps) {
   const value = (b: { seconds: number; amount: number }) => (money ? b.amount : b.seconds / 3600)
   const fmtValue = (v: number) => (money ? `$${fmtShort(Math.round(v))}` : `${Math.round(v * 10) / 10}h`)
   const yMax = niceMax(Math.max(...bins.map(value), lineGoal * 1.15, ...binTargets.map((t) => t * 1.05), 0))
@@ -38,7 +41,11 @@ function BarChart({ title, money, bins, byMonth, lineGoal, binTargets }: ChartPr
   const hasData = bins.some((b) => value(b) > 0)
   return (
     <article className="panel">
-      <div className="panel-heading"><h3>{title}</h3>{byMonth && money && binTargets.some(Boolean) && <span className="legend"><i className="legend-target" /> objetivo del mes</span>}</div>
+      <div className="panel-heading"><h3>{money ? 'Ganado' : 'Horas'} por {byMonth ? 'mes' : 'día'}</h3>
+        <div className="chart-head-right">{byMonth && money && binTargets.some(Boolean) && <span className="legend"><i className="legend-target" /> objetivo del mes</span>}
+          <div className="segmented small" role="tablist" aria-label="Qué mostrar"><button role="tab" aria-selected={!money} className={!money ? 'seg-on' : ''} onClick={() => setMoney(false)}>Horas</button><button role="tab" aria-selected={money} className={money ? 'seg-on' : ''} onClick={() => setMoney(true)}>US$</button></div>
+        </div>
+      </div>
       {!hasData ? <p className="empty-list">No hay {money ? 'ingresos' : 'tiempo registrado'} en este período.</p> : (
         <div className="schart">
           <div className="schart-y">{ticks.map((t, i) => <span key={i}>{fmtValue(t)}</span>)}</div>
@@ -68,57 +75,103 @@ function BarChart({ title, money, bins, byMonth, lineGoal, binTargets }: ChartPr
 }
 
 const ROWS = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
+const cap = (w: string) => w[0].toUpperCase() + w.slice(1)
+const num = (n: number) => n.toFixed(1).replace('.', ',')
 
-type Distracted = ReturnType<typeof distractionStats>
-
-/** Qué sitios te distraen y a qué horas, al lado de las horas en que más trabajás. */
-function DistractionPanel({ stats, work, best, extVersion, hasList }: { stats: Distracted; work: number[]; best: HourProfile['best']; extVersion: string; hasList: boolean }) {
-  const wMax = Math.max(...work)
-  const dMax = Math.max(...stats.byHour)
-  const topSites = stats.bySite.slice(0, 6)
+/**
+ * Responde dos preguntas con una sola grilla (día × hora): cuándo y qué días rendís más (verde, tiempo trabajado)
+ * y cuándo y con qué perdés el foco (rojo, intentos de abrir sitios bloqueados).
+ */
+function RhythmPanel({ r, extVersion }: { r: Rhythm; extVersion: string }) {
+  const max = Math.max(...r.work.grid.flat())
+  const level = (v: number) => (v <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((v / max) * 4))))
+  const dMax = Math.max(...r.distGrid.flat())
+  const dayMax = Math.max(...r.byDay.map((d) => d.avg))
+  const hMax = Math.max(...r.work.byHour)
+  const xMax = Math.max(...r.dist.byHour)
   const outdated = !!extVersion && extVersion.localeCompare(EXT_LATEST, undefined, { numeric: true }) < 0
+  const noFocusData = !extVersion ? 'Se mide con el modo foco de la extensión Tasker CRM Foco (no la detecto en este navegador).' : outdated ? 'Actualizá la extensión para medirlo.' : 'Sin intentos en este período: cargá sitios en Modo foco para medirlo.'
+  const [best, second] = r.bestDays
+  const top = r.dist.bySite[0]
   return (
-    <article className="panel distraction-panel">
-      <div className="panel-heading"><h3>¿Qué te distrae y cuándo?</h3>{stats.peak && <span className="legend">Más intentos: <b>{stats.peak.from} a {stats.peak.to} h</b> · {stats.peak.pct}%</span>}</div>
-      {stats.total === 0 ? (
-        <p className="empty-list">{outdated ? <>Tu extensión es de una versión anterior y no registra los intentos: actualizala (README de la carpeta <code>extension</code>).</> : !extVersion ? <>Se registra con la extensión <b>Tasker CRM Foco</b> cuando tu modo foco bloquea un sitio. Todavía no la detecto en este navegador.</> : !hasList ? <>Cargá sitios en <b>Modo foco</b> (debajo del timer): cada vez que intentes abrir uno mientras trabajás, queda anotado.</> : 'Sin intentos en este período. Buena señal.'}</p>
-      ) : (
-        <div className="distraction">
-          <div className="dist-sites">
-            <h4>{stats.total} intento{stats.total === 1 ? '' : 's'} de abrir sitios bloqueados</h4>
-            {topSites.map((x) => <div className="dist-site" key={x.site}><span>{x.site}</span><div className="group-bar"><div style={{ width: `${x.pct}%`, background: 'var(--danger)' }} /></div><b>{x.n}</b></div>)}
-            {stats.bySite.length > topSites.length && <small className="field-help">y {stats.bySite.length - topSites.length} sitio{stats.bySite.length - topSites.length === 1 ? '' : 's'} más</small>}
-          </div>
-          <div className="dist-hours" role="img" aria-label="Horas de trabajo e intentos de distracción por hora">
-            <div className="hours-row dist-row"><span title="Tiempo trabajado">Trab.</span>{work.map((v, h) => <b key={h} title={`${h}:00 · ${fmtHours(v)} trabajado`}><em className={best && h >= best.from && h < best.to ? 'best' : ''} style={{ height: `${wMax ? (v / wMax) * 100 : 0}%` }} /></b>)}</div>
-            <div className="hours-row dist-row"><span title="Intentos de abrir sitios bloqueados">Dist.</span>{stats.byHour.map((v, h) => <b key={h} title={`${h}:00 · ${v} intento${v === 1 ? '' : 's'}`}><em className="bad" style={{ height: `${dMax ? (v / dMax) * 100 : 0}%` }} /></b>)}</div>
-            <div className="hours-row hours-axis"><span />{work.map((_, h) => <small key={h}>{h % 3 === 0 ? h : ''}</small>)}</div>
-            {stats.peak && best && <p className="dist-insight">Rendís más entre las <b>{best.from} y las {best.to} h</b> y te distraés más entre las <b>{stats.peak.from} y las {stats.peak.to} h</b>. {stats.peak.from < best.to && stats.peak.to > best.from ? 'Se pisan: probá mover lo que más te cuesta a otra franja.' : 'Reservá tu mejor franja para las tareas que más te cuestan.'}</p>}
+    <article className="panel rhythm-panel">
+      <div className="panel-heading"><h3>Tu ritmo</h3><span className="legend"><i className="lg-work" /> tiempo trabajado <i className="lg-dist" /> intentos de distraerte</span></div>
+      <div className="rhythm-answers">
+        <div><span>¿Cuándo rendís más?</span><strong>{r.work.best ? `${r.work.best.from} a ${r.work.best.to} h` : '—'}</strong><small>{r.work.best ? `${r.work.best.pct}% de tu tiempo` : 'Sin tareas con hora de inicio'}</small></div>
+        <div><span>¿Qué días?</span><strong>{best ? cap(WEEKDAY_NAMES[best.day]) : '—'}</strong><small>{best ? `${fmtHours(best.avg)} promedio${second ? ` · después ${WEEKDAY_NAMES[second.day]} (${fmtHours(second.avg)})` : ''}` : 'Sin tiempo en este período'}</small></div>
+        <div><span>¿Cuándo perdés el foco?</span><strong className={r.lossPeak ? 'neg' : ''}>{r.lossPeak ? `${r.lossPeak.from} a ${r.lossPeak.to} h` : '—'}</strong><small>{r.lossPeak ? `${r.lossPeak.count} intento${r.lossPeak.count === 1 ? '' : 's'} · ${num(r.lossPeak.rate)} por hora trabajada` : noFocusData}</small></div>
+        <div><span>¿Con qué?</span><strong className={top ? 'neg' : ''}>{top ? top.site : '—'}</strong><small>{top ? `${top.n} de ${r.dist.total} intento${r.dist.total === 1 ? '' : 's'}${r.dist.bySite[1] ? ` · ${r.dist.bySite.slice(1, 3).map((x) => `${x.site} ${x.n}`).join(' · ')}` : ''}` : r.lossPeak ? '' : 'Ningún sitio todavía'}</small></div>
+      </div>
+      {r.work.total === 0 && r.dist.total === 0 ? <p className="empty-list">No hay tareas con hora de inicio en este período.</p> : (
+        <div className="rhythm-scroll">
+          <div className="rhythm-grid" role="img" aria-label="Tiempo trabajado e intentos de distraerte por día de la semana y hora">
+            {r.work.grid.map((row, d) => (
+              <div className="rhythm-row" key={d}>
+                <span className="rlabel">{ROWS[d]}</span>
+                {row.map((v, h) => {
+                  const n = r.distGrid[d][h]
+                  return <i key={h} className={`lv${level(v)}`} title={`${cap(WEEKDAY_NAMES[d])} ${h}:00 a ${h + 1}:00 · ${v > 0 ? fmtHours(v) : 'sin trabajo'}${n ? ` · ${n} intento${n === 1 ? '' : 's'} de distraerte` : ''}`}>{n > 0 && <b className="ddot" style={{ transform: `scale(${0.6 + 0.4 * (n / dMax)})` }} />}</i>
+                })}
+                <span className={`rday ${best?.day === d ? 'is-best' : ''}`} title={`${cap(WEEKDAY_NAMES[d])}: ${fmtHours(r.byDay[d].avg)} promedio · ${fmtHours(r.byDay[d].seconds)} en total`}><em style={{ width: `${dayMax ? (r.byDay[d].avg / dayMax) * 100 : 0}%` }} /><small>{r.byDay[d].avg > 0 ? fmtHours(r.byDay[d].avg) : ''}</small></span>
+              </div>
+            ))}
+            <div className="rhythm-row rbars"><span className="rlabel" title="Tiempo trabajado por hora">Σ</span>{r.work.byHour.map((v, h) => <b key={h} title={`${h}:00 · ${fmtHours(v)}`}><em className={r.work.best && h >= r.work.best.from && h < r.work.best.to ? 'best' : ''} style={{ height: `${hMax ? (v / hMax) * 100 : 0}%` }} /></b>)}<span className="rday rhead">promedio por día</span></div>
+            {r.dist.total > 0 && <div className="rhythm-row rbars rbars-dist"><span className="rlabel" title="Intentos de distraerte por hora">!</span>{r.dist.byHour.map((v, h) => <b key={h} title={`${h}:00 · ${v} intento${v === 1 ? '' : 's'}`}><em className="bad" style={{ height: `${xMax ? (v / xMax) * 100 : 0}%` }} /></b>)}<span className="rday" /></div>}
+            <div className="rhythm-row raxis"><span className="rlabel" />{r.work.byHour.map((_, h) => <small key={h}>{h % 3 === 0 ? h : ''}</small>)}<span className="rday" /></div>
           </div>
         </div>
       )}
+      <p className="group-note">{r.taskCount} tarea{r.taskCount === 1 ? '' : 's'} · sesión promedio {fmtHours(r.avgSession)}{r.dist.total > 0 ? ` · ${num(r.focusRate)} intentos de distraerte por hora trabajada` : ''}. Los días se comparan por promedio (cada lunes, cada martes…), no por total. La pérdida de foco se mide por hora trabajada: a la hora en que más trabajás también vas a tener más intentos.</p>
     </article>
   )
 }
 
-/** Tiempo por día de la semana y hora: dónde se concentra tu trabajo. */
-function HoursPanel({ profile }: { profile: HourProfile }) {
-  const max = Math.max(...profile.grid.flat())
-  const level = (v: number) => (v <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((v / max) * 4))))
-  const hMax = Math.max(...profile.byHour)
+type ExportProps = { report: () => ReportInput; tasks: Task[]; payments: Payment[]; clientName: (p: Payment) => string; distractions: Distraction[]; name: string }
+
+/** Exportar el período: informe (para leer, imprimir o pasarle a una IA) y los datos crudos en planillas. */
+function StatsExport({ report, tasks, payments, clientName, distractions, name }: ExportProps) {
+  const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const off = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false) }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', off)
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', off); document.removeEventListener('keydown', esc) }
+  }, [open])
+  const md = () => reportMarkdown(report())
+  const done = () => setOpen(false)
+  async function copy() {
+    try { await navigator.clipboard.writeText(md()); setCopied(true); window.setTimeout(() => { setCopied(false); done() }, 1200) } catch { download(`${name}.md`, md(), 'text/markdown;charset=utf-8'); done() }
+  }
+  function print() {
+    const r = report()
+    const w = window.open('', '_blank')
+    if (!w) return download(`${name}.html`, reportHtml(reportMarkdown(r), r.title), 'text/html;charset=utf-8')
+    w.document.write(reportHtml(reportMarkdown(r), r.title))
+    w.document.close()
+    w.focus()
+    window.setTimeout(() => w.print(), 300)
+    done()
+  }
   return (
-    <article className="panel hours-panel">
-      <div className="panel-heading"><h3>¿A qué hora trabajás más?</h3>{profile.best && <span className="legend">Tu mejor franja: <b>{profile.best.from} a {profile.best.to} h</b> · {profile.best.pct}% de tu tiempo</span>}</div>
-      {profile.total === 0 ? <p className="empty-list">No hay tareas con hora de inicio en este período.</p> : (
-        <div className="hours">
-          <div className="hours-grid" role="img" aria-label="Tiempo por día y hora">
-            {profile.grid.map((row, r) => <div className="hours-row" key={r}><span>{ROWS[r]}</span>{row.map((v, h) => <i key={h} className={`lv${level(v)}`} title={`${ROWS[r]} ${h}:00 a ${h + 1}:00 · ${v > 0 ? fmtHours(v) : 'nada'}`} />)}</div>)}
-            <div className="hours-row hours-total"><span>Σ</span>{profile.byHour.map((v, h) => <b key={h} title={`${h}:00 a ${h + 1}:00 · ${fmtHours(v)}`}><em style={{ height: `${hMax ? (v / hMax) * 100 : 0}%` }} className={profile.best && h >= profile.best.from && h < profile.best.to ? 'best' : ''} /></b>)}</div>
-            <div className="hours-row hours-axis"><span />{profile.byHour.map((_, h) => <small key={h}>{h % 3 === 0 ? h : ''}</small>)}</div>
-          </div>
+    <div className="export-wrap" ref={box}>
+      <button className="ghost-button" onClick={() => setOpen((o) => !o)} aria-expanded={open}><Download /> Exportar</button>
+      {open && (
+        <div className="export-pop" role="menu">
+          <p className="picker-group">Informe del período y filtros elegidos</p>
+          <button role="menuitem" onClick={print}><Printer /><span><b>Imprimir o guardar PDF</b><small>Resumen, comparación, plataformas y tu ritmo</small></span></button>
+          <button role="menuitem" onClick={() => { download(`${name}.md`, md(), 'text/markdown;charset=utf-8'); done() }}><FileText /><span><b>Informe (.md)</b><small>El mismo informe en texto</small></span></button>
+          <button role="menuitem" onClick={copy}>{copied ? <Check /> : <ClipboardCopy />}<span><b>{copied ? 'Copiado' : 'Copiar para una IA'}</b><small>Para pedirle que analice tus métricas</small></span></button>
+          <p className="picker-group">Datos para una planilla</p>
+          <button role="menuitem" disabled={!tasks.length} onClick={() => { download(`${name}-tareas.csv`, tasksToCsv(tasks), 'text/csv;charset=utf-8'); done() }}><FileSpreadsheet /><span><b>Tareas (.csv)</b><small>{tasks.length} del período, con notas</small></span></button>
+          <button role="menuitem" disabled={!payments.length} onClick={() => { download(`${name}-pagos.csv`, paymentsToCsv(payments, clientName), 'text/csv;charset=utf-8'); done() }}><FileSpreadsheet /><span><b>Pagos (.csv)</b><small>{payments.length} del período</small></span></button>
+          <button role="menuitem" disabled={!distractions.length} onClick={() => { download(`${name}-distracciones.csv`, distractionsToCsv(distractions), 'text/csv;charset=utf-8'); done() }}><FileSpreadsheet /><span><b>Distracciones (.csv)</b><small>{distractions.length} intento{distractions.length === 1 ? '' : 's'} del período</small></span></button>
         </div>
       )}
-    </article>
+    </div>
   )
 }
 
@@ -128,6 +181,7 @@ export function StatsView({ distractions, extVersion, tasks, payments, projects,
   const [groupBy, setGroupBy] = useState<GroupBy>('cliente')
   const [clientFilter, setClientFilter] = useState<string[]>([])
   const [billableOnly, setBillableOnly] = useState(false)
+  const [money, setMoney] = useState(false)
 
   const all = useMemo(() => buildEntries(tasks, payments, projects, clients), [tasks, payments, projects, clients])
   const clientNames = useMemo(() => [...new Set([...clients.map((c) => c.name), ...all.map((t) => t.client)])].sort(), [clients, all])
@@ -142,17 +196,18 @@ export function StatsView({ distractions, extVersion, tasks, payments, projects,
     const list = payments.filter((p) => p.paid && p.date >= from && p.date <= to && (!clientFilter.length || clientFilter.includes(nameOf(p))))
     return { gross: list.reduce((a, p) => a + p.amount, 0), fees: list.reduce((a, p) => a + (p.fee ?? 0), 0), count: list.length }
   }, [payments, projects, clients, s.range, clientFilter])
-  // Las franjas salen de las tareas con hora de inicio, con los mismos filtros que el resto.
-  const profile = useMemo(() => {
-    const from = dateKey(s.range.from), to = dateKey(s.range.to)
+  const prev = useMemo(() => previousStats(filtered, period, offset, today), [filtered, period, offset, today])
+  const from = dateKey(s.range.from), to = dateKey(s.range.to)
+  // Tareas y pagos del período con los mismos filtros: alimentan el ritmo y las exportaciones.
+  const clientOfPayment = (p: Payment) => clients.find((c) => c.id === paymentClientId(p, projects))?.name ?? ''
+  const periodTasks = useMemo(() => {
     const projectById = new Map(projects.map((p) => [p.id, p]))
-    const clientName = (projectId: string | null, fallback: string) => {
-      const p = projectId ? projectById.get(projectId) : undefined
-      return p ? clients.find((c) => c.id === p.clientId)?.name ?? fallback : fallback
-    }
-    return hourProfile(tasks.filter((t) => t.date >= from && t.date <= to && (!billableOnly || t.billable) && (!clientFilter.length || clientFilter.includes(clientName(t.projectId, t.client)))))
-  }, [tasks, projects, clients, s.range, clientFilter, billableOnly])
-  const distracted = useMemo(() => distractionStats(distractions, dateKey(s.range.from), dateKey(s.range.to)), [distractions, s.range])
+    const clientName = (t: Task) => { const p = t.projectId ? projectById.get(t.projectId) : undefined; return p ? clients.find((c) => c.id === p.clientId)?.name ?? t.client : t.client }
+    return tasks.filter((t) => t.date >= from && t.date <= to && (!billableOnly || t.billable) && (!clientFilter.length || clientFilter.includes(clientName(t))))
+  }, [tasks, projects, clients, from, to, clientFilter, billableOnly])
+  const periodPayments = payments.filter((p) => p.date >= from && p.date <= to && (!clientFilter.length || clientFilter.includes(clientOfPayment(p))))
+  const periodDistractions = useMemo(() => distractions.filter((d) => { const k = dateKey(new Date(d.t)); return k >= from && k <= to }), [distractions, from, to])
+  const r = useMemo(() => rhythm(periodTasks, distractions, from, to, today), [periodTasks, distractions, from, to, today])
   const groups = useMemo(() => {
     const gs = groupEntries(s.entries, groupBy, clientColors)
     return gs.filter((g) => g.seconds > 0 || g.amount > 0).sort((x, y) => y.amount - x.amount || y.seconds - x.seconds)
@@ -168,7 +223,15 @@ export function StatsView({ distractions, extVersion, tasks, payments, projects,
   return (
     <section className="view">
       <div className="view-heading">
-        <div><h2>Estadísticas</h2><p className="view-sub">Tiempo y plata por día, mes, plataforma y proyecto. <b>Ganado</b> es lo estimado (horas × tarifa + cobros y bonus); <b>Cobrado</b> es lo que te pagaron de verdad.</p></div>
+        <div><h2>Estadísticas</h2><p className="view-sub">Cuánto trabajaste y ganaste, cuánto vale de verdad tu hora y en qué momentos rendís más o perdés el foco. <b>Estimado</b> = horas × tarifa + bonus; <b>Cobrado</b> = lo que te pagaron de verdad.</p></div>
+        <div className="heading-actions">
+          <StatsExport name={`tasker-crm-${slug(s.range.label)}`} tasks={periodTasks} payments={periodPayments} clientName={clientOfPayment} distractions={periodDistractions} report={() => ({
+            title: `Informe Tasker CRM · ${s.range.label}`, periodLabel: `${s.range.label} (${from} al ${to})`, platforms: clientFilter, billableOnly,
+            seconds: s.seconds, billableSeconds: s.billableSeconds, amount: s.amount, collected: collected.gross, collectedCount: collected.count, fees: collected.fees,
+            effectiveRate: s.effectiveRate, perHour: s.perHour, workedDays: s.workedDays, prev,
+            groupLabel: GROUPS.find((g) => g.id === groupBy)!.label, groups: groups.map((g) => ({ name: g.name, seconds: g.seconds, amount: g.amount, perHour: g.valueSeconds > 0 ? g.imputed / (g.valueSeconds / 3600) : 0 })), rhythm: r,
+          })} />
+        </div>
       </div>
 
       <GoalPanel goal={goal} setGoal={setGoal} tasks={tasks} payments={payments} today={today} hourRate={effectiveRate(projects, tasks, payments, today, 90)} />
@@ -183,7 +246,7 @@ export function StatsView({ distractions, extVersion, tasks, payments, projects,
           <button onClick={() => setOffset((o) => o + 1)} disabled={period === 'todo' || offset >= 0} aria-label="Período siguiente"><ChevronRight /></button>
         </div>
         <div className="filters">
-          <MultiFilter options={clientNames.map((n) => ({ id: n, label: n, color: clientColors.get(n) }))} value={clientFilter} onChange={setClientFilter} allLabel="Todas las plataformas" noun="plataformas" />
+          <MultiFilter options={clientNames.map((n) => ({ id: n, label: n }))} value={clientFilter} onChange={setClientFilter} allLabel="Todas las plataformas" noun="plataformas" />
           <button className={`chip ${billableOnly ? 'chip-on' : ''}`} onClick={() => setBillableOnly((b) => !b)} aria-pressed={billableOnly}>Sólo facturable</button>
         </div>
       </div>
@@ -192,13 +255,18 @@ export function StatsView({ distractions, extVersion, tasks, payments, projects,
         const unpaid = s.seconds - s.billableSeconds
         const diff = collected.gross - s.amount
         const gap = s.perHour > 0 && s.effectiveRate > 0 ? Math.round((1 - s.effectiveRate / s.perHour) * 100) : 0
+        const delta = (now: number, before: number | undefined) => {
+          const c = prev && before !== undefined ? change(now, before) : null
+          return c === null ? null : <small className="delta"><b className={c >= 0 ? 'pos' : 'neg'}>{c >= 0 ? '▲' : '▼'} {Math.abs(c)}%</b> vs. {prev!.label}</small>
+        }
         return (
           <div className="summary-grid">
             <div className="summary-card" title="Todo el tiempo registrado. “Sin pago” es lo que no se factura: leer la documentación, hacer pruebas, assessments, esperas, onboarding no pago y lo personal.">
               <span><Clock3 /> Tiempo trabajado</span>
               <strong>{fmtHours(s.seconds)}</strong>
               {s.seconds > 0 && <div className="split-bar" aria-hidden="true"><i style={{ width: `${s.billablePct}%` }} /></div>}
-              <small>{s.seconds > 0 ? <><b>{fmtHours(s.billableSeconds)}</b> pagas · <b>{fmtHours(unpaid)}</b> sin pago (documentación, pruebas, assessments) · {s.workedDays} día{s.workedDays === 1 ? '' : 's'}</> : 'Sin tiempo registrado en este período'}</small>
+              <small>{s.seconds > 0 ? <><b>{fmtHours(s.billableSeconds)}</b> pagas · <b>{fmtHours(unpaid)}</b> sin pago (documentación, pruebas, assessments) · {s.workedDays} día{s.workedDays === 1 ? '' : 's'} · {r.taskCount} tarea{r.taskCount === 1 ? '' : 's'} de {fmtHours(r.avgSession)} en promedio</> : 'Sin tiempo registrado en este período'}</small>
+              {delta(s.seconds, prev?.seconds)}
             </div>
             <div className="summary-card" title="Estimado = horas × tarifa + bonus. Cobrado = lo que te llegó de verdad (pestaña Pagos). Los pagos llegan con atraso: para comparar, mirá el mes o el trimestre.">
               <span><Landmark /> Cobrado vs. estimado</span>
@@ -206,23 +274,21 @@ export function StatsView({ distractions, extVersion, tasks, payments, projects,
               <small>{collected.count === 0
                 ? (s.amount > 0 ? 'Todavía no cargaste pagos de este período: cargalos en Pagos para ver si te pagaron lo que trabajaste' : 'Sin ingresos en este período')
                 : <>{s.amount > 0 ? <><b className={diff < -0.005 ? 'neg' : 'pos'}>{diff >= 0 ? '+' : '−'}US$ {fmtMoney(Math.abs(diff))} ({Math.round((collected.gross / s.amount) * 100)}%)</b> vs. lo estimado</> : 'sin estimado para comparar'}{collected.fees > 0 ? ` · comisiones US$ ${fmtMoney(collected.fees)}` : ''}</>}</small>
+              {delta(s.amount, prev?.amount)}
             </div>
             <div className="summary-card" title="Lo ganado en plataformas ÷ TODAS las horas en ellas, incluido lo que no te pagan. Es lo que de verdad vale tu hora.">
               <span><Timer /> Valor real de tu hora</span>
               <strong>{s.effectiveRate > 0 ? `US$ ${fmtMoney(s.effectiveRate)}/h` : '—'}</strong>
               <small>{s.perHour > 0 ? <>La plataforma paga <b>US$ {fmtMoney(s.perHour)}/h</b>{gap > 0 ? <> · el tiempo sin pago te la baja un <b className="neg">{gap}%</b></> : ' · no hay tiempo sin pago'}</> : 'Todavía sin horas pagas en este período'}</small>
+              {delta(s.effectiveRate, prev?.effectiveRate)}
             </div>
           </div>
         )
       })()}
 
-      <div className="stats-grid even">
-        <BarChart title={`Horas por ${s.byMonth ? 'mes' : 'día'}`} money={false} bins={s.bins} byMonth={s.byMonth} lineGoal={0} binTargets={[]} />
-        <BarChart title={`Ganado por ${s.byMonth ? 'mes' : 'día'}`} money bins={s.bins} byMonth={s.byMonth} lineGoal={lineGoal} binTargets={binTargets} />
-      </div>
+      <BarChart money={money} setMoney={setMoney} bins={s.bins} byMonth={s.byMonth} lineGoal={money ? lineGoal : 0} binTargets={money ? binTargets : []} />
 
-      <HoursPanel profile={profile} />
-      <DistractionPanel stats={distracted} work={profile.byHour} best={profile.best} extVersion={extVersion} hasList={distractions.length > 0} />
+      <RhythmPanel r={r} extVersion={extVersion} />
 
       <article className="panel group-panel">
         <div className="panel-heading"><h3>Tiempo y plata por {GROUPS.find((g) => g.id === groupBy)!.label.toLowerCase()}</h3>

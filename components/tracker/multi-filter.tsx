@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 
-type Props = { options: { id: string; label: string; color?: string }[]; value: string[]; onChange: (v: string[]) => void; allLabel: string; noun: string }
+type Props = { options: { id: string; label: string }[]; value: string[]; onChange: (v: string[]) => void; allLabel: string; noun: string }
 
 /** Lista desplegable con casillas: vacío = todas; si no, sólo las elegidas. */
 export function MultiFilter({ options, value, onChange, allLabel, noun }: Props) {
@@ -31,7 +31,7 @@ export function MultiFilter({ options, value, onChange, allLabel, noun }: Props)
           <button type="button" role="option" aria-selected={picked.length === 0} className="multi-item" onClick={() => onChange([])}><i className={`multi-box ${picked.length === 0 ? 'on' : ''}`}>{picked.length === 0 && <Check />}</i>{allLabel}</button>
           {options.map((o) => {
             const on = value.includes(o.id)
-            return <button type="button" role="option" aria-selected={on} key={o.id} className="multi-item" onClick={() => toggle(o.id)}><i className={`multi-box ${on ? 'on' : ''}`}>{on && <Check />}</i>{o.color && <i className="dot" style={{ background: o.color }} />}{o.label}</button>
+            return <button type="button" role="option" aria-selected={on} key={o.id} className="multi-item" onClick={() => toggle(o.id)}><i className={`multi-box ${on ? 'on' : ''}`}>{on && <Check />}</i>{o.label}</button>
           })}
         </div>
       )}

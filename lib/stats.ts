@@ -288,3 +288,36 @@ export function hourProfile(tasks: { date: string; start?: string; seconds: numb
   }
   return { grid, byHour, total, best }
 }
+
+const PREV_LABEL: Partial<Record<Period, string>> = { hoy: 'ayer', semana: 'la semana anterior', mes: 'el mes anterior', trimestre: 'el trimestre anterior', año: 'el año anterior' }
+
+/**
+ * El período anterior, para comparar. Si el actual está en curso, se toma el mismo tramo del anterior
+ * (de lunes a jueves contra lunes a jueves), así una semana a medias no parece peor que una completa.
+ */
+export function previousStats(all: Entry[], period: Period, offset: number, today: string) {
+  const label = PREV_LABEL[period]
+  if (!label) return null
+  const cur = periodRange(period, offset, today, all)
+  const prev = periodRange(period, offset - 1, today, all)
+  const curEnd = dateKey(cur.to) > today ? noon(today) : cur.to
+  const partial = curEnd < cur.to
+  const span = Math.round((curEnd.getTime() - cur.from.getTime()) / 86400000)
+  const prevEnd = partial && addDays(prev.from, span) < prev.to ? addDays(prev.from, span) : prev.to
+  const from = dateKey(prev.from), to = dateKey(prevEnd)
+  const es = all.filter((e) => e.date >= from && e.date <= to)
+  const onPlatform = es.filter((e) => e.client !== PERSONAL && e.client !== NO_CLIENT)
+  const platformSeconds = onPlatform.reduce((s, e) => s + e.seconds, 0)
+  const platformAmount = onPlatform.reduce((s, e) => s + e.amount, 0)
+  return {
+    label: partial ? `${label} a esta altura` : label,
+    seconds: es.reduce((s, e) => s + e.seconds, 0),
+    amount: Math.round(es.reduce((s, e) => s + e.amount, 0) * 100) / 100,
+    effectiveRate: platformSeconds > 0 && platformAmount > 0 ? platformAmount / (platformSeconds / 3600) : 0,
+  }
+}
+
+/** Variación porcentual redondeada; null si no hay con qué comparar. */
+export function change(now: number, before: number) {
+  return before > 0 ? Math.round(((now - before) / before) * 100) : null
+}

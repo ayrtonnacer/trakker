@@ -5,6 +5,7 @@ import { ClipboardPaste, Landmark, Upload, Pencil, Plus, Search, Trash2, X } fro
 import { PAY_METHODS, PERSONAL, clientStatus, dateKey, fmtMoney, paymentClientId, paymentKind, parseAmount, uid, type Client, type Payment, type Project } from '@/lib/game'
 import { CSV_EXAMPLE, CSV_HEADER, parsePayments, type ParsedLine } from '@/lib/payments-import'
 import { download } from '@/lib/export'
+import { MultiFilter } from './multi-filter'
 
 const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 const fmtDay = (d: string) => d.split('-').reverse().slice(0, 2).join('/')
@@ -189,14 +190,14 @@ type Props = { clients: Client[]; projects: Project[]; payments: Payment[]; setP
 export function PaymentsView({ clients, projects, payments, setPayments, today }: Props) {
   const [form, setForm] = useState<FormProps['start'] | null>(null)
   const [bulk, setBulk] = useState(false)
-  const [clientFilter, setClientFilter] = useState('')
+  const [clientFilter, setClientFilter] = useState<string[]>([])
   const [query, setQuery] = useState('')
 
   const clientOf = (p: Payment) => clients.find((c) => c.id === paymentClientId(p, projects)) ?? null
   const q = query.trim().toLowerCase()
   const list = payments
     .filter((p) => p.paid)
-    .filter((p) => !clientFilter || paymentClientId(p, projects) === clientFilter)
+    .filter((p) => !clientFilter.length || clientFilter.includes(paymentClientId(p, projects) ?? ''))
     .filter((p) => !q || [p.label, p.method ?? '', clientOf(p)?.name ?? '', String(p.amount)].some((t) => t.toLowerCase().includes(q)))
     .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
   const months = [...new Set(list.map((p) => p.date.slice(0, 7)))]
@@ -235,7 +236,7 @@ export function PaymentsView({ clients, projects, payments, setPayments, today }
       {payments.some((p) => p.paid) && (
         <div className="task-filters">
           <label className="search-input"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar concepto, cuenta o monto" aria-label="Buscar pagos" />{query && <button className="icon-button" onClick={() => setQuery('')} aria-label="Limpiar búsqueda"><X /></button>}</label>
-          <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} aria-label="Filtrar por plataforma"><option value="">Todas las plataformas</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          <MultiFilter options={clients.map((c) => ({ id: c.id, label: c.name }))} value={clientFilter} onChange={setClientFilter} allLabel="Todas las plataformas" noun="plataformas" />
         </div>
       )}
 

@@ -1,5 +1,6 @@
 // Exportar tareas: Markdown para pasárselo a una IA o a un cliente, CSV para una planilla.
-import { fmtClock, fmtHours, fmtMoney, type Task } from './game'
+import { PAYMENT_KIND_LABEL, fmtClock, fmtHours, fmtMoney, paymentKind, type Payment, type Task } from './game'
+import type { Distraction } from './focus'
 import type { ReconRow } from './finance'
 
 const byDate = (a: Task, b: Task) => (a.date + (a.start ?? '')).localeCompare(b.date + (b.start ?? '')) || a.id - b.id
@@ -52,6 +53,22 @@ export function tasksToCsv(tasks: Task[]) {
   ])
   // BOM: así Excel abre bien las tildes.
   return '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n')
+}
+
+/** Pagos para una planilla. `clientName` resuelve la plataforma de cada pago. */
+export function paymentsToCsv(payments: Payment[], clientName: (p: Payment) => string) {
+  const head = ['Fecha', 'Plataforma', 'Tipo', 'Concepto', 'US$', 'Comisión', 'Neto', 'Cuenta', 'Estado']
+  const rows = [...payments].sort((a, b) => a.date.localeCompare(b.date)).map((p) => [
+    p.date, clientName(p), PAYMENT_KIND_LABEL[paymentKind(p)], p.label, p.amount.toFixed(2), (p.fee ?? 0).toFixed(2), (p.amount - (p.fee ?? 0)).toFixed(2), p.method ?? '', p.paid ? 'cobrado' : 'pendiente',
+  ])
+  return '\ufeff' + [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n')
+}
+
+/** Intentos de abrir sitios bloqueados, con fecha y hora local. */
+export function distractionsToCsv(list: Distraction[]) {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const rows = [...list].sort((a, b) => a.t - b.t).map((d) => { const x = new Date(d.t); return [`${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`, `${pad(x.getHours())}:${pad(x.getMinutes())}`, d.site] })
+  return '\ufeff' + [['Fecha', 'Hora', 'Sitio'], ...rows].map((r) => r.map(csvCell).join(',')).join('\n')
 }
 
 export function download(filename: string, text: string, type: string) {

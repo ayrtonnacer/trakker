@@ -39,6 +39,7 @@ import {
 import { CONCENTRATION_LIMIT, concentration, platformFinance, reconcile, type ReconRow } from '@/lib/finance'
 import { download, evidenceMarkdown, slug } from '@/lib/export'
 import { ExportMenu } from './export-menu'
+import { MultiFilter } from './multi-filter'
 import { LinkChip, LinksEditor } from './link-chip'
 import { PaymentForm, defaultClientId } from './payments-view'
 
@@ -112,7 +113,7 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
   // Con muchos proyectos: por defecto sólo los activos, y se puede ver una lista plana filtrada por cliente.
   const [layout, setLayout] = useState<'clientes' | 'proyectos'>('clientes')
   const [projectStatus, setProjectStatus] = useState<ProjectStatus | ''>('activo')
-  const [clientFilter, setClientFilter] = useState('')
+  const [clientFilter, setClientFilter] = useState<string[]>([]) // vacío = todas; 'personal' = sin plataforma
   const [sheetId, setSheetId] = useState<string | null>(null)
 
   const projectTotals = (p: Project) => {
@@ -280,8 +281,8 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
   const isPersonal = (p: Project) => !p.clientId || !clients.some((c) => c.id === p.clientId)
   const personal = projects.filter(isPersonal)
   const statusOk = (p: Project) => !projectStatus || statusOf(p) === projectStatus
-  const showClients = clientFilter ? (clientFilter === 'personal' ? [] : clients.filter((c) => c.id === clientFilter)) : statusFilter === 'personal' ? [] : clients.filter((c) => !statusFilter || accountBucket(c) === statusFilter)
-  const showPersonal = clientFilter ? clientFilter === 'personal' : !statusFilter || statusFilter === 'personal'
+  const showClients = clientFilter.length ? clients.filter((c) => clientFilter.includes(c.id)) : statusFilter === 'personal' ? [] : clients.filter((c) => !statusFilter || accountBucket(c) === statusFilter)
+  const showPersonal = clientFilter.length ? clientFilter.includes('personal') : !statusFilter || statusFilter === 'personal'
   const groups = [
     ...showClients.map((c) => {
       const own = projects.filter((p) => p.clientId === c.id)
@@ -397,9 +398,9 @@ export function ClientsView({ clients, projects, tasks, payments, setClients, se
         <label className="search-input clients-search"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar plataforma o proyecto" aria-label="Buscar plataforma o proyecto" />{query && <button className="icon-button" onClick={() => setQuery('')} aria-label="Limpiar búsqueda"><X /></button>}</label>
       </div>
       <div className="task-filters">
-        <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} aria-label="Filtrar por plataforma"><option value="">Todas las plataformas</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}<option value="personal">{PERSONAL}</option></select>
+        <MultiFilter options={[...clients.map((c) => ({ id: c.id, label: c.name })), { id: 'personal', label: PERSONAL }]} value={clientFilter} onChange={setClientFilter} allLabel="Todas las plataformas" noun="plataformas" />
         <select value={projectStatus} onChange={(e) => setProjectStatus(e.target.value as ProjectStatus | '')} aria-label="Estado de los proyectos"><option value="activo">Proyectos activos</option><option value="pausado">Proyectos pausados</option><option value="terminado">Proyectos terminados</option><option value="">Todos los proyectos</option></select>
-        {(clientFilter || projectStatus !== 'activo' || statusFilter) && <button className="text-button" onClick={() => { setClientFilter(''); setProjectStatus('activo'); setStatusFilter('') }}><X /> Limpiar</button>}
+        {(clientFilter.length > 0 || projectStatus !== 'activo' || statusFilter) && <button className="text-button" onClick={() => { setClientFilter([]); setProjectStatus('activo'); setStatusFilter('') }}><X /> Limpiar</button>}
       </div>
 
       {layout === 'proyectos' ? (
